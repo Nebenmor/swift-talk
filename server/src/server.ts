@@ -2,6 +2,7 @@ import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import App from './app';
 import { config } from './config/config';
+import SocketManager from './socket/socketHandlers';
 
 // Initialize Express app
 const app = new App();
@@ -19,19 +20,13 @@ const io = new SocketIOServer(httpServer, {
   transports: ['websocket', 'polling'],
 });
 
-// Socket.IO event handlers (to be implemented)
-io.on('connection', (socket) => {
-  console.log(`User connected: ${socket.id}`);
-  
-  socket.on('disconnect', (reason) => {
-    console.log(`User disconnected: ${socket.id}, reason: ${reason}`);
-  });
-});
+// Initialize Socket Manager
+const socketManager = new SocketManager(io);
 
 // Start the server
 const startServer = async (): Promise<void> => {
   try {
-    // Connect to database
+    // Connect to database first
     await app.start();
     
     // Start HTTP server with Socket.IO
@@ -88,4 +83,4 @@ process.on('unhandledRejection', (reason, promise) => {
 // Start the server
 startServer();
 
-export { io };
+export { io, socketManager };
