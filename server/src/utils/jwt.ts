@@ -1,69 +1,74 @@
 import jwt from 'jsonwebtoken';
 import { config } from '../config/config';
-import { IUser } from '../types';
 
-interface JwtPayload {
+export interface JwtPayload {
   userId: string;
   username: string;
-  email: string;
+  iat?: number; // issued at
+  exp?: number; // expiration
+  iss?: string; // issuer
+  aud?: string; // audience
 }
 
-export const generateToken = (user: IUser): string => {
-  const payload: JwtPayload = {
-    userId: user._id!,
-    username: user.username,
-    email: user.email,
-  };
+export const generateToken = (payload: JwtPayload): string => {
+  const secret = config.jwt.secret;
+  if (!secret) {
+    throw new Error('JWT secret is not configured');
+  }
 
-  return jwt.sign(payload, config.jwt.secret, {
-    expiresIn: config.jwt.expiresIn,
-    issuer: 'chat-app',
-    audience: 'chat-app-users',
+  return jwt.sign(payload, secret, {
+    expiresIn: config.jwt.expiresIn as any,
+    issuer: 'ChatApp',
+    audience: config.app.clientUrl,
   });
 };
 
 export const verifyToken = (token: string): JwtPayload => {
   try {
     const decoded = jwt.verify(token, config.jwt.secret, {
-      issuer: 'chat-app',
-      audience: 'chat-app-users',
+      issuer: 'ChatApp',
+      audience: config.app.clientUrl,
     }) as JwtPayload;
-
     return decoded;
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {
-      throw new Error('Token has expired');
-    } else if (error instanceof jwt.JsonWebTokenError) {
+      throw new Error('Token expired');
+    }
+    if (error instanceof jwt.JsonWebTokenError) {
       throw new Error('Invalid token');
-    } else {
-      throw new Error('Token verification failed');
     }
+    throw new Error('Token verification failed');
   }
 };
 
-export const extractTokenFromHeader = (authHeader: string | undefined): string => {
-  if (!authHeader) {
-    throw new Error('No authorization header provided');
+export const extractTokenFromHeader = (authHeader: string): string => {
+  if (!authHeader?.startsWith('Bearer ')) {
+    throw new Error('Invalid authorization header format');
   }
 
-  const parts = authHeader.split(' ');
-  if (parts.length !== 2 || parts[0] !== 'Bearer') {
-    throw new Error('Invalid authorization header format. Expected: Bearer <token>');
+  const token = authHeader.substring(7);
+  if (!token) {
+    throw new Error('No token provided');
   }
 
-  return parts[1];
+  return token;
 };
 
-export const isTokenExpired = (token: string): boolean => {
+export const refreshToken = (oldToken: string): string => {
   try {
-    const decoded = jwt.decode(token) as any;
-    if (!decoded || !decoded.exp) {
-      return true;
-    }
+    const decoded = jwt.verify(oldToken, config.jwt.secret, {
+      ignoreExpiration: true,
+      issuer: 'ChatApp',
+      audience: config.app.clientUrl,
+    }) as JwtPayload;
 
-    const currentTime = Math.floor(Date.now() / 1000);
-    return decoded.exp < currentTime;
+    // Generate new token with fresh expiration
+    return generateToken({
+      userId: decoded.userId,
+      username: decoded.username,
+    });
   } catch (error) {
-    return true;
+    console.error('Token refresh failed:', error);
+    throw new Error('Token refresh failed');
   }
 };
