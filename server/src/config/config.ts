@@ -16,7 +16,7 @@ interface Config {
   };
   jwt: {
     secret: string;
-    expiresIn: string;
+    expiresIn: string | number;
   };
   upload: {
     maxFileSize: number;
@@ -46,6 +46,20 @@ const validateEnv = (): void => {
   }
 };
 
+// Helper function to parse expiration time to match JWT types
+const parseExpiresIn = (value: string): string | number => {
+  // Check if it's a pure number (seconds)
+  if (/^\d+$/.test(value)) {
+    return parseInt(value, 10);
+  }
+  // Check if it's a time string like '7d', '24h', etc.
+  if (/^\d+[smhdwy]$/.test(value.toLowerCase())) {
+    return value;
+  }
+  // Default to treating as string
+  return value;
+};
+
 // Validate environment variables on startup
 validateEnv();
 
@@ -60,8 +74,8 @@ export const config: Config = {
     name: process.env.DB_NAME || 'chatapp',
   },
   jwt: {
-    secret: process.env.JWT_SECRET || 'fallback-secret-key',
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+    secret: process.env.JWT_SECRET!,  // Use ! to assert it's not undefined since we validate it
+    expiresIn: parseExpiresIn(process.env.JWT_EXPIRES_IN || '7d'),
   },
   upload: {
     maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '5242880', 10), // 5MB
