@@ -28,7 +28,7 @@ const startServer = async (): Promise<void> => {
   try {
     // Connect to database first
     await app.start();
-    
+
     // Start HTTP server with Socket.IO
     const port = config.app.port;
     httpServer.listen(port, () => {
@@ -40,19 +40,19 @@ const startServer = async (): Promise<void> => {
     // Graceful shutdown
     const gracefulShutdown = (signal: string): void => {
       console.log(`\n${signal} received. Shutting down gracefully...`);
-      
+
       httpServer.close(async () => {
         console.log('HTTP server closed');
-        
+
         // Close Socket.IO server
         io.close(() => {
           console.log('Socket.IO server closed');
         });
-        
+
         // Close database connection
         const { database } = await import('./config/database');
         await database.disconnect();
-        
+
         console.log('Graceful shutdown completed');
         process.exit(0);
       });
@@ -61,7 +61,6 @@ const startServer = async (): Promise<void> => {
     // Handle termination signals
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);
