@@ -44,7 +44,7 @@ class App {
     );
 
     // Compression middleware
-    this.app.use(compression());
+    this.app.use(compression() as unknown as express.RequestHandler);
 
     // Logging middleware
     if (config.app.env === 'development') {
@@ -64,6 +64,8 @@ class App {
       standardHeaders: true,
       legacyHeaders: false,
     });
+
+    // Apply rate limiting to API routes
     this.app.use('/api', limiter);
 
     // Body parsing middleware
@@ -154,21 +156,15 @@ class App {
     );
   }
 
+  // FIXED: Remove server starting logic, only handle database connection
   public async start(): Promise<void> {
     try {
-      // Connect to database
+      // Only connect to database - don't start server here
       await database.connect();
-
-      // Start server
-      const port = config.app.port;
-      this.app.listen(port, () => {
-        console.log(`🚀 Server running on port ${port}`);
-        console.log(`📍 Environment: ${config.app.env}`);
-        console.log(`🌍 Client URL: ${config.app.clientUrl}`);
-      });
+      console.log('✅ Connected to MongoDB:', database.getConnectionStatus());
     } catch (error) {
-      console.error('Failed to start server:', error);
-      process.exit(1);
+      console.error('Failed to connect to database:', error);
+      throw error; // Re-throw to let server.ts handle it
     }
   }
 }
