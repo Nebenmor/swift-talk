@@ -1,7 +1,7 @@
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { Request } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { config } from '../config/config';
 
 // Ensure upload directory exists
@@ -62,38 +62,40 @@ export const uploadSingle = uploadConfig.single('file');
 export const handleUploadError = (
   error: any,
   req: Request,
-  res: any,
-  next: any
+  res: Response,
+  next: NextFunction
 ): void => {
   if (error instanceof multer.MulterError) {
-    let message = 'File upload error';
+    let errorMessage: string;
     
     switch (error.code) {
       case 'LIMIT_FILE_SIZE':
-        message = `File too large. Maximum size is ${config.upload.maxFileSize / (1024 * 1024)}MB`;
+        errorMessage = `File too large. Maximum size is ${config.upload.maxFileSize / (1024 * 1024)}MB`;
         break;
       case 'LIMIT_FILE_COUNT':
-        message = 'Too many files. Only one file allowed';
+        errorMessage = 'Too many files. Only one file allowed';
         break;
       case 'LIMIT_UNEXPECTED_FILE':
-        message = 'Unexpected file field';
+        errorMessage = 'Unexpected file field';
         break;
       default:
-        message = error.message;
+        errorMessage = error.message;
     }
     
-    return res.status(400).json({
+    res.status(400).json({
       success: false,
-      message,
+      message: errorMessage,
       error: error.code,
     });
+    return;
   }
   
   if (error.message.includes('Invalid file type')) {
-    return res.status(400).json({
+    res.status(400).json({
       success: false,
       message: error.message,
     });
+    return;
   }
   
   // Pass other errors to the next error handler
