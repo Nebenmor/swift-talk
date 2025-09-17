@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import { User } from '../models/User';
 import { verifyToken, extractTokenFromHeader } from '../utils/jwt';
 import { ResponseUtil } from '../utils/response';
@@ -58,6 +58,7 @@ export const optionalAuth = async (
     next();
   } catch (error) {
     // For optional auth, we continue even if token is invalid
+    console.warn('Optional auth failed:', error);
     next();
   }
 };
