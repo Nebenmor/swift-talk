@@ -1,5 +1,12 @@
-import mongoose, { Schema } from 'mongoose';
-import { IFriendshipDocument } from '../types';
+import mongoose, { Schema, Document } from 'mongoose';
+
+export interface IFriendshipDocument extends Document {
+  requester: mongoose.Types.ObjectId;
+  recipient: mongoose.Types.ObjectId;
+  status: 'pending' | 'accepted' | 'declined' | 'blocked';
+  createdAt?: Date;
+  updatedAt?: Date;
+}
 
 const friendshipSchema = new Schema<IFriendshipDocument>(
   {
@@ -94,7 +101,7 @@ friendshipSchema.statics.getFriends = async function (userId: string) {
     .populate('recipient', 'username email avatar isOnline lastSeen')
     .lean();
 
-  return friendships.map((friendship) => {
+  return friendships.map((friendship: any) => {
     // Return the friend (the other person in the friendship)
     const friend =
       friendship.requester._id.toString() === userId
@@ -118,7 +125,7 @@ friendshipSchema.statics.getPendingRequests = async function (userId: string) {
     .populate('requester', 'username email avatar isOnline lastSeen')
     .lean();
 
-  return pendingRequests.map((request) => ({
+  return pendingRequests.map((request: any) => ({
     ...request.requester,
     requestId: request._id,
     requestedAt: request.createdAt,
@@ -134,7 +141,7 @@ friendshipSchema.statics.getSentRequests = async function (userId: string) {
     .populate('recipient', 'username email avatar isOnline lastSeen')
     .lean();
 
-  return sentRequests.map((request) => ({
+  return sentRequests.map((request: any) => ({
     ...request.recipient,
     requestId: request._id,
     requestedAt: request.createdAt,
