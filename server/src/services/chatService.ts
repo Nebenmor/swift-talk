@@ -15,10 +15,15 @@ export class ChatService {
       fileSize: number;
     }
   ): Promise<ChatMessage> {
-    // Check if users are friends
-    const friendshipStatus = await Friendship.getFriendshipStatus(senderId, recipientId);
+    // Check if users are friends - using direct query
+    const friendship = await Friendship.findOne({
+      $or: [
+        { requester: senderId, recipient: recipientId, status: 'accepted' },
+        { requester: recipientId, recipient: senderId, status: 'accepted' }
+      ]
+    });
     
-    if (friendshipStatus !== 'accepted') {
+    if (!friendship) {
       throw new Error('Can only send messages to friends');
     }
 
@@ -48,6 +53,64 @@ export class ChatService {
       _id: message._id?.toString(),
       sender: {
         _id: message.sender._id.toString(),
+        username: (message.sender as any).username,
+        avatar: (message.sender as any).avatar,
+      },
+      recipient: message.recipient.toString(),
+      content: message.content,
+      messageType: message.messageType,
+      fileUrl: message.fileUrl,
+      fileName: message.fileName,
+      fileSize: message.fileSize,
+      isRead: message.isRead,
+      createdAt: message.createdAt || new Date(),
+    };
+  }
+
+  static async getChatHistory(
+    userId: string,
+    otherUserId: string,
+    page = 1,
+    limit = 50
+  ): Promise<PaginatedResponse<ChatMessage>> {
+    // Check if users are friends - using direct query
+    const friendship = await Friendship.findOne({
+      $or: [
+        { requester: userId, recipient: otherUserId, status: 'accepted' },
+        { requester: otherUserId, recipient: userId, status: 'accepted' }
+      ]
+    });
+    
+    if (!friendship) {
+      throw new Error('Can only view chat history with friends');
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [messages, total] = await Promise.all([
+      Message.find({
+        $or: [
+          { sender: userId, recipient: otherUserId },
+          { sender: otherUserId, recipient: userId }
+        ]
+      })
+      .populate('sender', 'username avatar')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+      Message.countDocuments({
+        $or: [
+          { sender: userId, recipient: otherUserId },
+          { sender: otherUserId, recipient: userId }
+        ]
+      })
+    ]);
+
+    const formattedMessages: ChatMessage[] = messages.map((message: any) => ({
+      _id: message._id.toString(),
+      sender: {
+        _id: message.sender._id.toString(),
         username: message.sender.username,
         avatar: message.sender.avatar,
       },
@@ -58,45 +121,17 @@ export class ChatService {
       fileName: message.fileName,
       fileSize: message.fileSize,
       isRead: message.isRead,
-      createdAt: message.createdAt,
-    };
-  }
-
-  static async getChatHistory(
-    userId: string,
-    otherUserId: string,
-    page = 1,
-    limit = 50
-  ): Promise<PaginatedResponse<ChatMessage>> {
-    // Check if users are friends
-    const friendshipStatus = await Friendship.getFriendshipStatus(userId, otherUserId);
-    
-    if (friendshipStatus !== 'accepted') {
-      throw new Error('Can only view chat history with friends');
-    }
-
-    const result = await Message.getChatHistory(userId, otherUserId, page, limit) as any;
-
-    const formattedMessages: ChatMessage[] = result.messages.map((message: any) => ({
-      _id: message._id.toString(),
-      sender: {
-        _id: message.sender._id.toString(),
-        username: message.sender.username,
-        avatar: message.sender.avatar,
-      },
-      recipient: message.recipient._id ? message.recipient._id.toString() : message.recipient,
-      content: message.content,
-      messageType: message.messageType,
-      fileUrl: message.fileUrl,
-      fileName: message.fileName,
-      fileSize: message.fileSize,
-      isRead: message.isRead,
-      createdAt: message.createdAt,
+      createdAt: message.createdAt || new Date(),
     }));
 
     return {
       data: formattedMessages,
-      pagination: result.pagination,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      },
     };
   }
 
@@ -104,14 +139,26 @@ export class ChatService {
     senderId: string,
     recipientId: string
   ): Promise<void> {
-    await Message.markAsRead(senderId, recipientId);
+    await Message.updateMany(
+      {
+        sender: senderId,
+        recipient: recipientId,
+        isRead: false
+      },
+      { isRead: true }
+    );
   }
 
   static async getUnreadMessagesCount(
     userId: string,
     senderId?: string
   ): Promise<number> {
-    return await Message.getUnreadCount(userId, senderId);
+    const query: any = { recipient: userId, isRead: false };
+    if (senderId) {
+      query.sender = senderId;
+    }
+    
+    return await Message.countDocuments(query);
   }
 
   static async deleteMessage(
@@ -131,7 +178,7 @@ export class ChatService {
 
     // Check if message is less than 10 minutes old
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-    if (message.createdAt < tenMinutesAgo) {
+    if (message.createdAt && message.createdAt < tenMinutesAgo) {
       throw new Error('Can only delete messages within 10 minutes of sending');
     }
 
@@ -191,7 +238,7 @@ export class ChatService {
       fileName: message.fileName,
       fileSize: message.fileSize,
       isRead: message.isRead,
-      createdAt: message.createdAt,
+      createdAt: message.createdAt || new Date(),
     }));
 
     return {
@@ -206,14 +253,43 @@ export class ChatService {
   }
 
   static async getChatRooms(userId: string): Promise<any[]> {
-    // Get all friends
-    const friends = await Friendship.getFriends(userId) as any[];
+    // Get all friends using direct query
+    const friendships = await Friendship.find({
+      $or: [
+        { requester: userId, status: 'accepted' },
+        { recipient: userId, status: 'accepted' }
+      ]
+    })
+    .populate('requester', 'username avatar isOnline lastSeen')
+    .populate('recipient', 'username avatar isOnline lastSeen')
+    .lean();
+
+    const friends = friendships.map(friendship => {
+      return (friendship.requester as any)._id.toString() === userId 
+        ? friendship.recipient as any
+        : friendship.requester as any;
+    });
     
     // Get chat rooms with last message and unread count
     const chatRooms = await Promise.all(
       friends.map(async (friend) => {
-        const lastMessage = await Message.getLatestMessage(userId, friend._id);
-        const unreadCount = await Message.getUnreadCount(userId, friend._id);
+        // Get latest message
+        const lastMessage = await Message.findOne({
+          $or: [
+            { sender: userId, recipient: friend._id },
+            { sender: friend._id, recipient: userId }
+          ]
+        })
+        .sort({ createdAt: -1 })
+        .populate('sender', 'username')
+        .lean();
+
+        // Get unread count
+        const unreadCount = await Message.countDocuments({
+          sender: friend._id,
+          recipient: userId,
+          isRead: false
+        });
         
         return {
           participant: {
@@ -225,15 +301,17 @@ export class ChatService {
           },
           lastMessage,
           unreadCount,
-          updatedAt: lastMessage ? lastMessage.createdAt : friend.friendsSince,
+          updatedAt: lastMessage ? lastMessage.createdAt : new Date(),
         };
       })
     );
 
     // Sort by last message time
-    return chatRooms.sort((a, b) => 
-      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-    );
+    return chatRooms.sort((a, b) => {
+      const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      return bTime - aTime;
+    });
   }
 
   static async uploadFile(
@@ -263,9 +341,9 @@ export class ChatService {
     return {
       _id: message._id.toString(),
       sender: {
-        _id: message.sender._id.toString(),
-        username: message.sender.username,
-        avatar: message.sender.avatar,
+        _id: (message.sender as any)._id.toString(),
+        username: (message.sender as any).username,
+        avatar: (message.sender as any).avatar,
       },
       recipient: message.recipient.toString(),
       content: message.content,
@@ -274,7 +352,7 @@ export class ChatService {
       fileName: message.fileName,
       fileSize: message.fileSize,
       isRead: message.isRead,
-      createdAt: message.createdAt,
+      createdAt: message.createdAt || new Date(),
     };
   }
 
