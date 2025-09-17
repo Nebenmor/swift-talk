@@ -10,13 +10,13 @@ export const handleValidationErrors = (
   next: NextFunction
 ): void => {
   const errors = validationResult(req);
-  
+
   if (!errors.isEmpty()) {
     const errorMessages = errors.array().map((error) => error.msg);
     ResponseUtil.validationError(res, errorMessages);
     return;
   }
-  
+
   next();
 };
 
@@ -26,25 +26,24 @@ export const validateRegister = [
     .trim()
     .isLength({ min: 3, max: 20 })
     .withMessage('Username must be between 3 and 20 characters')
-    .matches(/^[a-zA-Z0-9_]+$/)
+    .matches(/^\w+$/)
     .withMessage('Username can only contain letters, numbers, and underscores')
     .toLowerCase(),
-  
+
   body('email')
     .trim()
     .isEmail()
     .withMessage('Please provide a valid email address')
     .normalizeEmail(),
-    
-  body('password')
-    .custom((value) => {
-      const validation = validatePasswordStrength(value);
-      if (!validation.isValid) {
-        throw new Error(validation.errors.join(', '));
-      }
-      return true;
-    }),
-    
+
+  body('password').custom((value) => {
+    const validation = validatePasswordStrength(value);
+    if (!validation.isValid) {
+      throw new Error(validation.errors.join(', '));
+    }
+    return true;
+  }),
+
   handleValidationErrors,
 ];
 
@@ -53,11 +52,9 @@ export const validateLogin = [
     .trim()
     .notEmpty()
     .withMessage('Username or email is required'),
-    
-  body('password')
-    .notEmpty()
-    .withMessage('Password is required'),
-    
+
+  body('password').notEmpty().withMessage('Password is required'),
+
   handleValidationErrors,
 ];
 
@@ -69,17 +66,17 @@ export const validateSendMessage = [
     .withMessage('Recipient is required')
     .isMongoId()
     .withMessage('Invalid recipient ID'),
-    
+
   body('content')
     .trim()
     .isLength({ min: 1, max: 1000 })
     .withMessage('Message content must be between 1 and 1000 characters'),
-    
+
   body('messageType')
     .optional()
     .isIn(['text', 'file'])
     .withMessage('Message type must be text or file'),
-    
+
   handleValidationErrors,
 ];
 
@@ -89,9 +86,9 @@ export const validateFriendRequest = [
     .trim()
     .isLength({ min: 3, max: 20 })
     .withMessage('Username must be between 3 and 20 characters')
-    .matches(/^[a-zA-Z0-9_]+$/)
+    .matches(/^\w+$/)
     .withMessage('Username can only contain letters, numbers, and underscores'),
-    
+
   handleValidationErrors,
 ];
 
@@ -102,43 +99,39 @@ export const validatePagination = [
     .isInt({ min: 1 })
     .withMessage('Page must be a positive integer')
     .toInt(),
-    
+
   query('limit')
     .optional()
     .isInt({ min: 1, max: 100 })
     .withMessage('Limit must be between 1 and 100')
     .toInt(),
-    
+
   handleValidationErrors,
 ];
 
 // MongoDB ObjectId validation
 export const validateObjectId = (paramName: string) => [
-  param(paramName)
-    .isMongoId()
-    .withMessage(`Invalid ${paramName} format`),
-    
+  param(paramName).isMongoId().withMessage(`Invalid ${paramName} format`),
+
   handleValidationErrors,
 ];
 
 // Chat room validation
 export const validateChatParams = [
-  param('userId')
-    .isMongoId()
-    .withMessage('Invalid user ID format'),
-    
+  param('userId').isMongoId().withMessage('Invalid user ID format'),
+
   query('page')
     .optional()
     .isInt({ min: 1 })
     .withMessage('Page must be a positive integer')
     .toInt(),
-    
+
   query('limit')
     .optional()
     .isInt({ min: 1, max: 50 })
     .withMessage('Limit must be between 1 and 50')
     .toInt(),
-    
+
   handleValidationErrors,
 ];
 
