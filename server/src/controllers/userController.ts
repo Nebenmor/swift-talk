@@ -4,7 +4,7 @@ import { ResponseUtil, handleAsyncError } from '../utils/response';
 import { AuthRequest } from '../types';
 
 export class UserController {
-  static searchUsers = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly searchUsers = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     const { q: query, limit } = req.query;
     
@@ -21,7 +21,7 @@ export class UserController {
     ResponseUtil.success(res, users, 'Users retrieved successfully');
   });
 
-  static getUserById = handleAsyncError(async (req: Request, res: Response) => {
+  static readonly getUserById = handleAsyncError(async (req: Request, res: Response) => {
     const { userId } = req.params;
     
     const user = await UserService.getUserById(userId);
@@ -33,7 +33,7 @@ export class UserController {
     ResponseUtil.success(res, user, 'User retrieved successfully');
   });
 
-  static getUserByUsername = handleAsyncError(async (req: Request, res: Response) => {
+  static readonly getUserByUsername = handleAsyncError(async (req: Request, res: Response) => {
     const { username } = req.params;
     
     const user = await UserService.getUserByUsername(username);
@@ -45,7 +45,7 @@ export class UserController {
     ResponseUtil.success(res, user, 'User retrieved successfully');
   });
 
-  static getFriends = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly getFriends = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     
     const friends = await UserService.getFriends(userId);
@@ -53,7 +53,7 @@ export class UserController {
     ResponseUtil.success(res, friends, 'Friends retrieved successfully');
   });
 
-  static getFriendsWithMessages = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly getFriendsWithMessages = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     
     const friends = await UserService.getFriendsWithLastMessage(userId);
@@ -61,7 +61,7 @@ export class UserController {
     ResponseUtil.success(res, friends, 'Friends with messages retrieved successfully');
   });
 
-  static sendFriendRequest = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly sendFriendRequest = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     const { username } = req.body;
     
@@ -75,7 +75,7 @@ export class UserController {
     );
   });
 
-  static getPendingRequests = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly getPendingRequests = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     
     const requests = await UserService.getPendingFriendRequests(userId);
@@ -83,7 +83,7 @@ export class UserController {
     ResponseUtil.success(res, requests, 'Pending requests retrieved successfully');
   });
 
-  static getSentRequests = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly getSentRequests = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     
     const requests = await UserService.getSentFriendRequests(userId);
@@ -91,7 +91,7 @@ export class UserController {
     ResponseUtil.success(res, requests, 'Sent requests retrieved successfully');
   });
 
-  static acceptFriendRequest = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly acceptFriendRequest = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     const { requestId } = req.params;
     
@@ -100,7 +100,7 @@ export class UserController {
     ResponseUtil.success(res, null, 'Friend request accepted');
   });
 
-  static declineFriendRequest = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly declineFriendRequest = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     const { requestId } = req.params;
     
@@ -109,7 +109,7 @@ export class UserController {
     ResponseUtil.success(res, null, 'Friend request declined');
   });
 
-  static removeFriend = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly removeFriend = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     const { friendId } = req.params;
     
@@ -118,7 +118,7 @@ export class UserController {
     ResponseUtil.success(res, null, 'Friend removed successfully');
   });
 
-  static blockUser = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly blockUser = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     const { userId: blockedId } = req.params;
     
@@ -127,7 +127,7 @@ export class UserController {
     ResponseUtil.success(res, null, 'User blocked successfully');
   });
 
-  static getOnlineFriends = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly getOnlineFriends = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     
     const onlineFriends = await UserService.getOnlineFriends(userId);
@@ -135,7 +135,7 @@ export class UserController {
     ResponseUtil.success(res, onlineFriends, 'Online friends retrieved successfully');
   });
 
-  static getFriendshipStatus = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly getFriendshipStatus = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     const { userId: otherUserId } = req.params;
     
@@ -144,7 +144,7 @@ export class UserController {
     ResponseUtil.success(res, { status }, 'Friendship status retrieved successfully');
   });
 
-  static getUserStats = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly getUserStats = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     
     const stats = await UserService.getUserStats(userId);
@@ -152,7 +152,7 @@ export class UserController {
     ResponseUtil.success(res, stats, 'User stats retrieved successfully');
   });
 
-  static updateOnlineStatus = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly updateOnlineStatus = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     const { isOnline } = req.body;
     
