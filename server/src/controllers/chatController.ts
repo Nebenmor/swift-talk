@@ -4,7 +4,7 @@ import { ResponseUtil, handleAsyncError } from '../utils/response';
 import { AuthRequest } from '../types';
 
 export class ChatController {
-  static sendMessage = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly sendMessage = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const senderId = req.user!._id!;
     const { recipient, content, messageType = 'text' } = req.body;
     
@@ -23,7 +23,7 @@ export class ChatController {
     );
   });
 
-  static sendFileMessage = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly sendFileMessage = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const senderId = req.user!._id!;
     const { recipient } = req.body;
     const file = req.file;
@@ -56,7 +56,7 @@ export class ChatController {
     );
   });
 
-  static getChatHistory = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly getChatHistory = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     const { userId: otherUserId } = req.params;
     const page = parseInt(req.query.page as string) || 1;
@@ -77,7 +77,7 @@ export class ChatController {
     );
   });
 
-  static markMessagesAsRead = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly markMessagesAsRead = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const recipientId = req.user!._id!;
     const { userId: senderId } = req.params;
     
@@ -86,7 +86,7 @@ export class ChatController {
     ResponseUtil.success(res, null, 'Messages marked as read');
   });
 
-  static getUnreadCount = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly getUnreadCount = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     const senderId = req.query.senderId as string;
     
@@ -95,7 +95,7 @@ export class ChatController {
     ResponseUtil.success(res, { count }, 'Unread count retrieved successfully');
   });
 
-  static deleteMessage = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly deleteMessage = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     const { messageId } = req.params;
     
@@ -104,7 +104,7 @@ export class ChatController {
     ResponseUtil.success(res, null, 'Message deleted successfully');
   });
 
-  static searchMessages = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly searchMessages = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     const { q: query, userId: otherUserId } = req.query;
     const page = parseInt(req.query.page as string) || 1;
@@ -130,7 +130,7 @@ export class ChatController {
     );
   });
 
-  static getChatRooms = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly getChatRooms = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     
     const chatRooms = await ChatService.getChatRooms(userId);
@@ -138,7 +138,7 @@ export class ChatController {
     ResponseUtil.success(res, chatRooms, 'Chat rooms retrieved successfully');
   });
 
-  static getMessageById = handleAsyncError(async (req: Request, res: Response) => {
+  static readonly getMessageById = handleAsyncError(async (req: Request, res: Response) => {
     const { messageId } = req.params;
     
     const message = await ChatService.getMessageById(messageId);
@@ -150,7 +150,7 @@ export class ChatController {
     ResponseUtil.success(res, message, 'Message retrieved successfully');
   });
 
-  static uploadFile = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly uploadFile = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     const file = req.file;
     
@@ -168,7 +168,7 @@ export class ChatController {
     );
   });
 
-  static getUserOnlineStatus = handleAsyncError(async (req: Request, res: Response) => {
+  static readonly getUserOnlineStatus = handleAsyncError(async (req: Request, res: Response) => {
     const { userId } = req.params;
     
     const isOnline = await ChatService.isUserOnline(userId);
