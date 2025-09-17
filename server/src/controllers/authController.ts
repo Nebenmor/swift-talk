@@ -4,7 +4,7 @@ import { ResponseUtil, handleAsyncError } from '../utils/response';
 import { AuthRequest, LoginCredentials, RegisterCredentials } from '../types';
 
 export class AuthController {
-  static register = handleAsyncError(async (req: Request, res: Response) => {
+  static readonly register = handleAsyncError(async (req: Request, res: Response) => {
     const credentials: RegisterCredentials = req.body;
     
     const result = await AuthService.register(credentials);
@@ -17,7 +17,7 @@ export class AuthController {
     );
   });
 
-  static login = handleAsyncError(async (req: Request, res: Response) => {
+  static readonly login = handleAsyncError(async (req: Request, res: Response) => {
     const credentials: LoginCredentials = req.body;
     
     const result = await AuthService.login(credentials);
@@ -29,7 +29,7 @@ export class AuthController {
     );
   });
 
-  static logout = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly logout = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     
     await AuthService.logout(userId);
@@ -41,7 +41,7 @@ export class AuthController {
     );
   });
 
-  static getCurrentUser = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly getCurrentUser = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     
     const user = await AuthService.getCurrentUser(userId);
@@ -53,7 +53,7 @@ export class AuthController {
     );
   });
 
-  static updateProfile = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly updateProfile = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     const updateData = req.body;
     
@@ -76,7 +76,7 @@ export class AuthController {
     );
   });
 
-  static changePassword = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly changePassword = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     const { currentPassword, newPassword } = req.body;
     
@@ -97,7 +97,7 @@ export class AuthController {
     );
   });
 
-  static refreshToken = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly refreshToken = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const userId = req.user!._id!;
     
     const token = await AuthService.refreshToken(userId);
@@ -109,7 +109,7 @@ export class AuthController {
     );
   });
 
-  static verifyToken = handleAsyncError(async (req: AuthRequest, res: Response) => {
+  static readonly verifyToken = handleAsyncError(async (req: AuthRequest, res: Response) => {
     // If we reach here, the token is valid (middleware already verified it)
     ResponseUtil.success(
       res,
