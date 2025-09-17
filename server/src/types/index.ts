@@ -1,11 +1,12 @@
 import { Document } from 'mongoose';
+import { Request } from 'express';
 
 // User Types
 export interface IUser {
   _id?: string;
   username: string;
   email: string;
-  password: string;
+  password?: string; // Make password optional for responses
   avatar?: string;
   isOnline: boolean;
   lastSeen: Date;
@@ -13,7 +14,12 @@ export interface IUser {
   updatedAt: Date;
 }
 
-export interface IUserDocument extends IUser, Document {
+// User type for responses (without password)
+export interface IUserResponse extends Omit<IUser, 'password'> {
+  _id: string;
+}
+
+export interface IUserDocument extends Omit<IUser, '_id'>, Document {
   comparePassword(candidatePassword: string): Promise<boolean>;
 }
 
@@ -32,7 +38,7 @@ export interface IMessage {
   updatedAt: Date;
 }
 
-export interface IMessageDocument extends IMessage, Document {}
+export interface IMessageDocument extends Omit<IMessage, '_id'>, Document {}
 
 // Friendship Types
 export interface IFriendship {
@@ -44,7 +50,7 @@ export interface IFriendship {
   updatedAt: Date;
 }
 
-export interface IFriendshipDocument extends IFriendship, Document {}
+export interface IFriendshipDocument extends Omit<IFriendship, '_id'>, Document {}
 
 // Auth Types
 export interface LoginCredentials {
@@ -59,8 +65,13 @@ export interface RegisterCredentials {
 }
 
 export interface AuthResponse {
-  user: Omit<IUser, 'password'>;
+  user: IUserResponse;
   token: string;
+}
+
+// Request Types - FIX: Properly extend Express Request
+export interface AuthRequest extends Request {
+  user?: IUserResponse;
 }
 
 // Socket Types
@@ -103,11 +114,6 @@ export interface PaginatedResponse<T> {
     total: number;
     pages: number;
   };
-}
-
-// Request Types
-export interface AuthRequest extends Express.Request {
-  user?: IUser;
 }
 
 // Friend Request Types
