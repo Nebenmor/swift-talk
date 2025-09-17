@@ -1,7 +1,7 @@
 import { User } from '../models/User';
 import { generateToken } from '../utils/jwt';
 import { validatePasswordStrength } from '../utils/password';
-import { LoginCredentials, RegisterCredentials, AuthResponse, IUser } from '../types';
+import { LoginCredentials, RegisterCredentials, AuthResponse, IUserResponse } from '../types';
 
 export class AuthService {
   static async register(credentials: RegisterCredentials): Promise<AuthResponse> {
@@ -37,14 +37,17 @@ export class AuthService {
     await user.save();
 
     // Generate JWT token
-    const token = generateToken(user.toObject());
+    const token = generateToken({
+      userId: user._id?.toString() || '',
+      username: user.username,
+    });
 
     // Return user without password
     const userResponse = user.toObject();
-    delete userResponse.password;
+    const { password: _, ...userWithoutPassword } = userResponse;
 
     return {
-      user: userResponse,
+      user: userWithoutPassword as IUserResponse,
       token,
     };
   }
@@ -70,30 +73,36 @@ export class AuthService {
       throw new Error('Invalid credentials');
     }
 
-    // Update user status
-    await user.setOnlineStatus(true);
+    // Update user status - using direct MongoDB update instead of custom method
+    await User.findByIdAndUpdate(user._id, { 
+      isOnline: true, 
+      lastSeen: new Date() 
+    });
 
     // Generate JWT token
-    const token = generateToken(user.toObject());
+    const token = generateToken({
+      userId: user._id?.toString() || '',
+      username: user.username,
+    });
 
     // Return user without password
     const userResponse = user.toObject();
-    delete userResponse.password;
+    const { password: _, ...userWithoutPassword } = userResponse;
 
     return {
-      user: userResponse,
+      user: userWithoutPassword as IUserResponse,
       token,
     };
   }
 
   static async logout(userId: string): Promise<void> {
-    const user = await User.findById(userId);
-    if (user) {
-      await user.setOnlineStatus(false);
-    }
+    await User.findByIdAndUpdate(userId, { 
+      isOnline: false, 
+      lastSeen: new Date() 
+    });
   }
 
-  static async getCurrentUser(userId: string): Promise<IUser> {
+  static async getCurrentUser(userId: string): Promise<IUserResponse> {
     const user = await User.findById(userId).select('-password');
     if (!user) {
       throw new Error('User not found');
@@ -104,8 +113,8 @@ export class AuthService {
 
   static async updateProfile(
     userId: string,
-    updateData: Partial<Pick<IUser, 'email' | 'avatar'>>
-  ): Promise<IUser> {
+    updateData: Partial<Pick<IUserResponse, 'email' | 'avatar'>>
+  ): Promise<IUserResponse> {
     const user = await User.findById(userId);
     if (!user) {
       throw new Error('User not found');
@@ -124,9 +133,9 @@ export class AuthService {
     await user.save();
 
     const updatedUser = user.toObject();
-    delete updatedUser.password;
+    const { password: _, ...userWithoutPassword } = updatedUser;
 
-    return updatedUser;
+    return userWithoutPassword as IUserResponse;
   }
 
   static async changePassword(
@@ -162,6 +171,9 @@ export class AuthService {
       throw new Error('User not found');
     }
 
-    return generateToken(user.toObject());
+    return generateToken({
+      userId: user._id?.toString() || '',
+      username: user.username,
+    });
   }
 }
