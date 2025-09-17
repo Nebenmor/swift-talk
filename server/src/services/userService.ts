@@ -1,14 +1,14 @@
 import { User } from '../models/User';
 import { Friendship } from '../models/Friendship';
 import { Message } from '../models/Message';
-import { FriendResponse, IUser } from '../types';
+import { FriendResponse, IUserResponse } from '../types';
 
 export class UserService {
   static async searchUsers(
     query: string,
     currentUserId: string,
     limit = 10
-  ): Promise<IUser[]> {
+  ): Promise<IUserResponse[]> {
     if (!query || query.trim().length < 2) {
       return [];
     }
@@ -29,12 +29,12 @@ export class UserService {
     return users;
   }
 
-  static async getUserById(userId: string): Promise<IUser | null> {
+  static async getUserById(userId: string): Promise<IUserResponse | null> {
     const user = await User.findById(userId).select('-password').lean();
     return user;
   }
 
-  static async getUserByUsername(username: string): Promise<IUser | null> {
+  static async getUserByUsername(username: string): Promise<IUserResponse | null> {
     const user = await User.findOne({ username: username.toLowerCase() })
       .select('-password')
       .lean();
@@ -42,17 +42,34 @@ export class UserService {
   }
 
   static async getFriends(userId: string): Promise<FriendResponse[]> {
-    const friends = await Friendship.getFriends(userId) as any[];
-    
-    return friends.map((friend) => ({
-      _id: friend._id,
-      username: friend.username,
-      email: friend.email,
-      avatar: friend.avatar,
-      isOnline: friend.isOnline,
-      lastSeen: friend.lastSeen,
-      friendshipStatus: 'accepted' as const,
-    }));
+    // Use direct MongoDB query instead of missing custom method
+    const friendships = await Friendship.find({
+      $or: [
+        { requester: userId, status: 'accepted' },
+        { recipient: userId, status: 'accepted' }
+      ]
+    })
+    .populate('requester', 'username email avatar isOnline lastSeen')
+    .populate('recipient', 'username email avatar isOnline lastSeen')
+    .lean();
+
+    const friends = friendships.map(friendship => {
+      const friend = (friendship.requester as any)._id.toString() === userId 
+        ? friendship.recipient as any
+        : friendship.requester as any;
+      
+      return {
+        _id: friend._id.toString(),
+        username: friend.username,
+        email: friend.email,
+        avatar: friend.avatar,
+        isOnline: friend.isOnline,
+        lastSeen: friend.lastSeen,
+        friendshipStatus: 'accepted' as const,
+      };
+    });
+
+    return friends;
   }
 
   static async sendFriendRequest(
@@ -104,12 +121,26 @@ export class UserService {
   }
 
   static async getPendingFriendRequests(userId: string) {
-    const pendingRequests = await Friendship.getPendingRequests(userId);
+    // Direct query instead of missing custom method
+    const pendingRequests = await Friendship.find({
+      recipient: userId,
+      status: 'pending'
+    })
+    .populate('requester', 'username avatar')
+    .lean();
+
     return pendingRequests;
   }
 
   static async getSentFriendRequests(userId: string) {
-    const sentRequests = await Friendship.getSentRequests(userId);
+    // Direct query instead of missing custom method
+    const sentRequests = await Friendship.find({
+      requester: userId,
+      status: 'pending'
+    })
+    .populate('recipient', 'username avatar')
+    .lean();
+
     return sentRequests;
   }
 
@@ -117,38 +148,87 @@ export class UserService {
     userId: string,
     requestId: string
   ): Promise<void> {
-    await Friendship.acceptRequest(requestId, userId);
+    const friendship = await Friendship.findById(requestId);
+    
+    if (!friendship) {
+      throw new Error('Friend request not found');
+    }
+
+    if (friendship.recipient.toString() !== userId) {
+      throw new Error('Not authorized to accept this request');
+    }
+
+    if (friendship.status !== 'pending') {
+      throw new Error('Request already processed');
+    }
+
+    friendship.status = 'accepted';
+    await friendship.save();
   }
 
   static async declineFriendRequest(
     userId: string,
     requestId: string
   ): Promise<void> {
-    await Friendship.declineRequest(requestId, userId);
+    const friendship = await Friendship.findById(requestId);
+    
+    if (!friendship) {
+      throw new Error('Friend request not found');
+    }
+
+    if (friendship.recipient.toString() !== userId) {
+      throw new Error('Not authorized to decline this request');
+    }
+
+    if (friendship.status !== 'pending') {
+      throw new Error('Request already processed');
+    }
+
+    await Friendship.findByIdAndDelete(requestId);
   }
 
   static async removeFriend(
     userId: string,
     friendId: string
   ): Promise<void> {
-    await Friendship.removeFriendship(userId, friendId);
+    await Friendship.findOneAndDelete({
+      $or: [
+        { requester: userId, recipient: friendId, status: 'accepted' },
+        { requester: friendId, recipient: userId, status: 'accepted' }
+      ]
+    });
   }
 
   static async blockUser(
     blockerId: string,
     blockedId: string
   ): Promise<void> {
-    await Friendship.blockUser(blockerId, blockedId);
+    // Remove existing friendship if any
+    await Friendship.findOneAndDelete({
+      $or: [
+        { requester: blockerId, recipient: blockedId },
+        { requester: blockedId, recipient: blockerId }
+      ]
+    });
+
+    // Create block relationship
+    const blockFriendship = new Friendship({
+      requester: blockerId,
+      recipient: blockedId,
+      status: 'blocked'
+    });
+
+    await blockFriendship.save();
   }
 
   static async updateOnlineStatus(
     userId: string,
     isOnline: boolean
   ): Promise<void> {
-    const user = await User.findById(userId);
-    if (user) {
-      await user.setOnlineStatus(isOnline);
-    }
+    await User.findByIdAndUpdate(userId, {
+      isOnline,
+      lastSeen: new Date()
+    });
   }
 
   static async getOnlineFriends(userId: string): Promise<FriendResponse[]> {
@@ -160,7 +240,18 @@ export class UserService {
     userId: string,
     otherUserId: string
   ): Promise<string | null> {
-    return await Friendship.getFriendshipStatus(userId, otherUserId);
+    const friendship = await Friendship.findOne({
+      $or: [
+        { requester: userId, recipient: otherUserId },
+        { requester: otherUserId, recipient: userId }
+      ]
+    });
+
+    if (!friendship) {
+      return null;
+    }
+
+    return friendship.status;
   }
 
   static async getUserStats(userId: string) {
@@ -171,7 +262,10 @@ export class UserService {
           { recipient: userId, status: 'accepted' },
         ],
       }),
-      Message.getUnreadCount(userId),
+      Message.countDocuments({
+        recipient: userId,
+        isRead: false
+      })
     ]);
 
     return {
@@ -185,8 +279,23 @@ export class UserService {
     
     const friendsWithMessages = await Promise.all(
       friends.map(async (friend) => {
-        const lastMessage = await Message.getLatestMessage(userId, friend._id);
-        const unreadCount = await Message.getUnreadCount(userId, friend._id);
+        // Get latest message between users
+        const lastMessage = await Message.findOne({
+          $or: [
+            { sender: userId, recipient: friend._id },
+            { sender: friend._id, recipient: userId }
+          ]
+        })
+        .sort({ createdAt: -1 })
+        .populate('sender', 'username')
+        .lean();
+
+        // Get unread count
+        const unreadCount = await Message.countDocuments({
+          sender: friend._id,
+          recipient: userId,
+          isRead: false
+        });
         
         return {
           ...friend,
@@ -201,7 +310,7 @@ export class UserService {
       if (!a.lastMessage && !b.lastMessage) return 0;
       if (!a.lastMessage) return 1;
       if (!b.lastMessage) return -1;
-      return new Date(b.lastMessage.createdAt).getTime() - new Date(a.lastMessage.createdAt).getTime();
+      return new Date(b.lastMessage.createdAt || new Date()).getTime() - new Date(a.lastMessage.createdAt || new Date()).getTime();
     });
   }
 }
