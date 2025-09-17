@@ -2,12 +2,12 @@ import { Server, Socket } from 'socket.io';
 import { verifyToken } from '../utils/jwt';
 import { UserService } from '../services/userService';
 import { ChatService } from '../services/chatService';
-import { SocketUser, ChatMessage } from '../types';
+import { SocketUser } from '../types';
 
 class SocketManager {
-  private io: Server;
-  private connectedUsers: Map<string, SocketUser> = new Map();
-  private userSockets: Map<string, string> = new Map(); // userId -> socketId
+  private readonly io: Server;
+  private readonly connectedUsers: Map<string, SocketUser> = new Map();
+  private readonly userSockets: Map<string, string> = new Map(); // userId -> socketId
 
   constructor(io: Server) {
     this.io = io;
@@ -100,22 +100,22 @@ class SocketManager {
 
     // Store user connection
     const socketUser: SocketUser = {
-      userId: user._id!,
+      userId: user._id,
       socketId: socket.id,
       username: user.username,
     };
 
     this.connectedUsers.set(socket.id, socketUser);
-    this.userSockets.set(user._id!, socket.id);
+    this.userSockets.set(user._id, socket.id);
 
     // Update user online status
-    await UserService.updateOnlineStatus(user._id!, true);
+    await UserService.updateOnlineStatus(user._id, true);
 
     // Join user to their personal room
     socket.join(`user_${user._id}`);
 
     // Notify friends about online status
-    await this.notifyFriendsOnlineStatus(user._id!, true);
+    await this.notifyFriendsOnlineStatus(user._id, true);
 
     // Send authentication success
     socket.emit('authenticated', {
@@ -303,7 +303,7 @@ class SocketManager {
 
   private getChatRoomId(userId1: string, userId2: string): string {
     // Create consistent room ID regardless of user order
-    const sortedIds = [userId1, userId2].sort();
+    const sortedIds = [userId1, userId2].sort((a, b) => a.localeCompare(b));
     return `chat_${sortedIds[0]}_${sortedIds[1]}`;
   }
 
