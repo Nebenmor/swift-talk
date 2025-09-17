@@ -28,7 +28,7 @@ class DatabaseConnection {
         maxPoolSize: 10, // Maintain up to 10 socket connections
         serverSelectionTimeoutMS: 5000, // Keep trying to send operations for 5 seconds
         socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
-        bufferMaxEntries: 0, // Disable mongoose buffering
+        // bufferMaxEntries has been removed - it's no longer a valid option in newer Mongoose versions
       });
 
       this.isConnected = true;
