@@ -12,7 +12,7 @@ const userSchema = new Schema<IUserDocument>(
       minlength: [3, 'Username must be at least 3 characters long'],
       maxlength: [20, 'Username must be less than 20 characters'],
       match: [
-        /^[a-zA-Z0-9_]+$/,
+        /^\w+$/,  // Use concise \w instead of [a-zA-Z0-9_]
         'Username can only contain alphanumeric characters and underscores',
       ],
     },
@@ -85,12 +85,17 @@ userSchema.pre('save', async function (next) {
   }
 
   try {
+    // Ensure password exists and is a string
+    if (!this.password || typeof this.password !== 'string') {
+      throw new Error('Password is required');
+    }
+    
     // Hash password with salt rounds of 12
     const hashedPassword = await bcrypt.hash(this.password, 12);
     this.password = hashedPassword;
     next();
   } catch (error) {
-    next(error as Error);
+    return next(error as Error);
   }
 });
 
@@ -98,11 +103,7 @@ userSchema.pre('save', async function (next) {
 userSchema.methods.comparePassword = async function (
   candidatePassword: string
 ): Promise<boolean> {
-  try {
-    return await bcrypt.compare(candidatePassword, this.password);
-  } catch (error) {
-    throw new Error('Password comparison failed');
-  }
+  return await bcrypt.compare(candidatePassword, this.password);
 };
 
 // Static method to find user by username or email
