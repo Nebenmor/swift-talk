@@ -1,5 +1,17 @@
-import mongoose, { Schema } from 'mongoose';
-import { IMessageDocument } from '../types';
+import mongoose, { Schema, Document } from 'mongoose';
+
+export interface IMessageDocument extends Document {
+  sender: mongoose.Types.ObjectId;
+  recipient: mongoose.Types.ObjectId;
+  content: string;
+  messageType: 'text' | 'file';
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  isRead: boolean;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
 
 const messageSchema = new Schema<IMessageDocument>(
   {
@@ -77,7 +89,7 @@ messageSchema.index({ sender: 1, recipient: 1, createdAt: -1 });
 // Virtual for chat room ID (sorted participant IDs)
 messageSchema.virtual('chatRoom').get(function (this: IMessageDocument) {
   const participants = [this.sender.toString(), this.recipient.toString()];
-  return participants.sort().join('-');
+  return [...participants].sort((a, b) => a.localeCompare(b)).join('-');
 });
 
 // Static method to get chat history between two users
