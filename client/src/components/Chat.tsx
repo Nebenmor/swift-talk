@@ -5,6 +5,7 @@ import FriendsList from "./FriendsList";
 import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
 import AddFriend from "./AddFriend";
+import FriendRequests from "./FriendRequests";
 import { getUser, removeToken, removeUser } from "../lib/auth";
 import { socketService } from "../lib/socket";
 import api from "../lib/api";
@@ -16,6 +17,7 @@ export default function Chat() {
   const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [showAddFriend, setShowAddFriend] = useState(false);
+  const [showFriendRequests, setShowFriendRequests] = useState(false);
   const [loading, setLoading] = useState(true);
   const [socketConnected, setSocketConnected] = useState(false);
   const navigate = useNavigate();
@@ -239,9 +241,20 @@ export default function Chat() {
     setShowAddFriend(true);
   };
 
+  const handleShowFriendRequests = () => {
+    setShowFriendRequests(true);
+  };
+
   const onFriendAdded = async () => {
     setShowAddFriend(false);
     // Refresh friends list after adding a friend
+    await loadFriends();
+    toast.success("Friends list updated!");
+  };
+
+  const onRequestHandled = async () => {
+    setShowFriendRequests(false);
+    // Refresh friends list after handling requests
     await loadFriends();
     toast.success("Friends list updated!");
   };
@@ -291,6 +304,13 @@ export default function Chat() {
             </div>
           </div>
           <div className="flex gap-2">
+            <button
+              onClick={handleShowFriendRequests}
+              className="btn btn-secondary text-sm"
+              title="Friend Requests"
+            >
+              Requests
+            </button>
             <button
               onClick={handleAddFriend}
               className="btn btn-primary text-sm"
@@ -395,6 +415,14 @@ export default function Chat() {
         <AddFriend
           onClose={() => setShowAddFriend(false)}
           onFriendAdded={onFriendAdded}
+        />
+      )}
+
+      {/* Friend Requests Modal */}
+      {showFriendRequests && (
+        <FriendRequests
+          onClose={() => setShowFriendRequests(false)}
+          onRequestHandled={onRequestHandled}
         />
       )}
     </div>
