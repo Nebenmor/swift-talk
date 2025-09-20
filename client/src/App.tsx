@@ -1,133 +1,66 @@
-import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import { useAuthStore } from './stores/authStore';
-import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
-import ChatPage from './pages/ChatPage';
-import LoadingSpinner from './components/ui/LoadingSpinner';
+import Login from './components/Login';
+import Signup from './components/Signup';
+import Chat from './components/Chat';
+import { isAuthenticated } from './lib/auth';
 
-// Protected Route Component
-const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuthStore();
-
-  if (isLoading) {
-    return <LoadingSpinner />;
-  }
-
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
+// Simple protected route component
+const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+  return isAuthenticated() ? <>{children}</> : <Navigate to="/login" replace />;
 };
 
-// Public Route Component (redirect if authenticated)
-const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuthStore();
-
-  if (isLoading) {
-    return <LoadingSpinner />;
-  }
-
-  return !isAuthenticated ? <>{children}</> : <Navigate to="/chat" replace />;
+// Simple public route component (redirect if already logged in)
+const PublicRoute = ({ children }: { children: React.ReactNode }) => {
+  return !isAuthenticated() ? <>{children}</> : <Navigate to="/chat" replace />;
 };
 
-const App: React.FC = () => {
-  const { initializeAuth, isLoading } = useAuthStore();
-
-  useEffect(() => {
-    initializeAuth();
-  }, [initializeAuth]);
-
-  // Show loading screen while initializing auth
-  if (isLoading) {
-    return <LoadingSpinner />;
-  }
-
+function App() {
   return (
     <Router>
-      <div className="App">
+      <div className="min-h-screen bg-gray-50">
         <Routes>
-          {/* Public Routes */}
-          <Route
-            path="/login"
+          <Route 
+            path="/login" 
             element={
               <PublicRoute>
-                <LoginPage />
+                <Login />
               </PublicRoute>
-            }
+            } 
           />
-          <Route
-            path="/register"
+          <Route 
+            path="/signup" 
             element={
               <PublicRoute>
-                <RegisterPage />
+                <Signup />
               </PublicRoute>
-            }
+            } 
           />
-
-          {/* Protected Routes */}
-          <Route
-            path="/chat"
+          <Route 
+            path="/chat" 
             element={
               <ProtectedRoute>
-                <ChatPage />
+                <Chat />
               </ProtectedRoute>
-            }
+            } 
           />
-          <Route
-            path="/chat/:userId"
-            element={
-              <ProtectedRoute>
-                <ChatPage />
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Default Route */}
           <Route path="/" element={<Navigate to="/chat" replace />} />
-
-          {/* 404 Route */}
-          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-
-        {/* Global Toast Notifications */}
+        
+        {/* Toast notifications */}
         <Toaster
           position="top-right"
-          gutter={8}
-          containerClassName="toast-container"
           toastOptions={{
             duration: 4000,
             style: {
-              background: '#363636',
+              background: '#333',
               color: '#fff',
-              borderRadius: '8px',
-              padding: '12px 16px',
-              fontSize: '14px',
-              maxWidth: '400px',
-            },
-            success: {
-              duration: 3000,
-              iconTheme: {
-                primary: '#22c55e',
-                secondary: '#fff',
-              },
-            },
-            error: {
-              duration: 5000,
-              iconTheme: {
-                primary: '#ef4444',
-                secondary: '#fff',
-              },
-            },
-            loading: {
-              iconTheme: {
-                primary: '#3b82f6',
-                secondary: '#fff',
-              },
             },
           }}
         />
       </div>
     </Router>
   );
-};
+}
 
 export default App;
