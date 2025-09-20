@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
 
@@ -20,42 +20,62 @@ export default function AddFriend({ onClose, onFriendAdded }: AddFriendProps) {
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [selectedUser, setSelectedUser] = useState<SearchResult | null>(null);
-  const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
+  
+  // Use ref for timeout to avoid dependency issues
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Search for users as user types
+  // Clear timeout on component unmount
   useEffect(() => {
-    if (searchTimeout) {
-      clearTimeout(searchTimeout);
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const searchUsers = async (query: string) => {
+    if (query.trim().length < 2) {
+      setSearchResults([]);
+      return;
     }
 
-    if (username.trim().length >= 2) {
-      const timeout = setTimeout(async () => {
-        setSearching(true);
-        try {
-          const response = await api.get(`/users/search?q=${encodeURIComponent(username.trim())}&limit=5`);
-          if (response.data.success) {
-            setSearchResults(response.data.data || []);
-          }
-        } catch (error) {
-          console.error('Search failed:', error);
-          setSearchResults([]);
-        } finally {
-          setSearching(false);
-        }
-      }, 500); // Debounce search by 500ms
-
-      setSearchTimeout(timeout);
-    } else {
+    setSearching(true);
+    try {
+      const response = await api.get(`/users/search?q=${encodeURIComponent(query.trim())}&limit=5`);
+      if (response.data.success) {
+        setSearchResults(response.data.data || []);
+      }
+    } catch (error) {
+      console.error('Search failed:', error);
       setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setUsername(value);
+    
+    // Clear selected user when typing
+    if (selectedUser) {
       setSelectedUser(null);
     }
 
-    return () => {
-      if (searchTimeout) {
-        clearTimeout(searchTimeout);
-      }
-    };
-  }, [username]);
+    // Clear existing timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    // Set new timeout for search
+    if (value.trim().length >= 2 && !selectedUser) {
+      searchTimeoutRef.current = setTimeout(() => {
+        searchUsers(value);
+      }, 500);
+    } else {
+      setSearchResults([]);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,9 +101,17 @@ export default function AddFriend({ onClose, onFriendAdded }: AddFriendProps) {
       } else {
         toast.error(response.data.message || 'Failed to send friend request');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to send friend request:', error);
-      const message = error.response?.data?.message || error.response?.data?.error || 'Failed to send friend request';
+      
+      let message = 'Failed to send friend request';
+      if (error && typeof error === 'object' && 'response' in error) {
+        const axiosError = error as { response?: { data?: { message?: string; error?: string } } };
+        message = axiosError.response?.data?.message || 
+                 axiosError.response?.data?.error || 
+                 'Failed to send friend request';
+      }
+      
       toast.error(message);
     } finally {
       setLoading(false);
@@ -91,10 +119,27 @@ export default function AddFriend({ onClose, onFriendAdded }: AddFriendProps) {
   };
 
   const handleUserSelect = (user: SearchResult) => {
+    // Clear timeout when user is selected
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    
     setSelectedUser(user);
     setUsername(user.username);
     setSearchResults([]);
   };
+
+  const clearSelection = () => {
+    setSelectedUser(null);
+    setUsername('');
+    setSearchResults([]);
+  };
+
+  // Determine if we should show "No users found" message
+  const shouldShowNoResults = username.trim().length >= 2 && 
+                              !searching && 
+                              !selectedUser && 
+                              searchResults.length === 0;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -110,10 +155,7 @@ export default function AddFriend({ onClose, onFriendAdded }: AddFriendProps) {
               type="text"
               id="username"
               value={username}
-              onChange={(e) => {
-                setUsername(e.target.value);
-                setSelectedUser(null); // Clear selection when typing
-              }}
+              onChange={handleInputChange}
               required
               className="form-input"
               placeholder="Type username to search..."
@@ -122,7 +164,7 @@ export default function AddFriend({ onClose, onFriendAdded }: AddFriendProps) {
             />
             
             {/* Search Results Dropdown */}
-            {searchResults.length > 0 && (
+            {searchResults.length > 0 && !selectedUser && (
               <div className="absolute z-10 w-full bg-white border border-gray-300 rounded-md mt-1 max-h-60 overflow-y-auto shadow-lg">
                 {searchResults.map((user) => (
                   <button
@@ -163,7 +205,7 @@ export default function AddFriend({ onClose, onFriendAdded }: AddFriendProps) {
             )}
             
             {/* No results message */}
-            {username.trim().length >= 2 && !searching && searchResults.length === 0 && (
+            {shouldShowNoResults && (
               <div className="absolute z-10 w-full bg-white border border-gray-300 rounded-md mt-1 p-3 shadow-lg">
                 <p className="text-gray-500 text-sm">No users found matching "{username}"</p>
               </div>
@@ -193,11 +235,9 @@ export default function AddFriend({ onClose, onFriendAdded }: AddFriendProps) {
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    setSelectedUser(null);
-                    setUsername('');
-                  }}
+                  onClick={clearSelection}
                   className="text-gray-400 hover:text-gray-600"
+                  title="Clear selection"
                 >
                   ✕
                 </button>
