@@ -118,6 +118,12 @@ export class UserController {
   });
 
   static readonly acceptFriendRequest = handleAsyncError(async (req: AuthRequest, res: Response) => {
+    console.log('=== ACCEPT REQUEST CONTROLLER DEBUG ===');
+    console.log('User ID from req.user:', req.user!._id);
+    console.log('User object:', req.user);
+    console.log('Request ID from params:', req.params.requestId);
+    console.log('Full params:', req.params);
+    
     const userId = req.user!._id;
     const { requestId } = req.params;
     
@@ -125,6 +131,8 @@ export class UserController {
       await UserService.acceptFriendRequest(userId, requestId);
       ResponseUtil.success(res, null, 'Friend request accepted');
     } catch (error: any) {
+      console.error('Accept request error:', error);
+      
       let statusCode = 400;
       if (error.message.includes('not found')) {
         statusCode = 404;
@@ -139,6 +147,12 @@ export class UserController {
   });
 
   static readonly declineFriendRequest = handleAsyncError(async (req: AuthRequest, res: Response) => {
+    console.log('=== DECLINE REQUEST CONTROLLER DEBUG ===');
+    console.log('User ID from req.user:', req.user!._id);
+    console.log('User object:', req.user);
+    console.log('Request ID from params:', req.params.requestId);
+    console.log('Full params:', req.params);
+    
     const userId = req.user!._id;
     const { requestId } = req.params;
     
@@ -147,6 +161,8 @@ export class UserController {
       const result = await UserService.declineFriendRequest(userId, requestId);
       ResponseUtil.success(res, null, result.message || 'Friend request declined');
     } catch (error: any) {
+      console.error('Decline request error:', error);
+      
       let statusCode = 400;
       if (error.message.includes('not found')) {
         statusCode = 404;
