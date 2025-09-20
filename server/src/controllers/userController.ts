@@ -143,8 +143,9 @@ export class UserController {
     const { requestId } = req.params;
     
     try {
-      await UserService.declineFriendRequest(userId, requestId);
-      ResponseUtil.success(res, null, 'Friend request declined');
+      // Check if this is the user declining a request they received or canceling one they sent
+      const result = await UserService.declineFriendRequest(userId, requestId);
+      ResponseUtil.success(res, null, result.message || 'Friend request declined');
     } catch (error: any) {
       let statusCode = 400;
       if (error.message.includes('not found')) {
