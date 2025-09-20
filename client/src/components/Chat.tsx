@@ -1,5 +1,4 @@
-// src/components/Chat.tsx
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import FriendsList from "./FriendsList";
@@ -18,7 +17,10 @@ export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [socketConnected, setSocketConnected] = useState(false);
   const navigate = useNavigate();
+  const isInitialized = useRef(false);
+  const socketListenersSetup = useRef(false);
 
   // Load friends from API
   const loadFriends = useCallback(async () => {
@@ -62,11 +64,15 @@ export default function Chat() {
     ) {
       setMessages((prev) => [...prev, message]);
     }
+    
+    // Update friends list to show latest message
+    loadFriends();
+    
     // Only show toast for messages from others
     if (message.sender._id !== user?._id) {
       toast.success(`New message from ${message.sender.username}`);
     }
-  }, [selectedFriend, user?._id]);
+  }, [selectedFriend, user?._id, loadFriends]);
 
   // Handle friend status updates
   const handleFriendStatusUpdate = useCallback(
@@ -80,8 +86,55 @@ export default function Chat() {
     []
   );
 
+  // Handle socket connection
+  const handleSocketConnection = useCallback(() => {
+    console.log('Socket connected successfully');
+    setSocketConnected(true);
+  }, []);
+
+  const handleSocketDisconnection = useCallback(() => {
+    console.log('Socket disconnected');
+    setSocketConnected(false);
+  }, []);
+
+  const handleSocketError = useCallback((error: any) => {
+    console.error('Socket connection error:', error);
+    setSocketConnected(false);
+  }, []);
+
+  // Setup socket event listeners only once
+  const setupSocketListeners = useCallback(() => {
+    if (socketListenersSetup.current) return;
+    
+    // Wait for socket to be connected before setting up listeners
+    const connectAndSetupListeners = async () => {
+      try {
+        // Connect socket first
+        await socketService.connect();
+        
+        // Now setup listeners on the connected socket
+        socketService.on("connect", handleSocketConnection);
+        socketService.on("disconnect", handleSocketDisconnection);
+        socketService.on("connect_error", handleSocketError);
+        socketService.on("new_message", handleNewMessage);
+        socketService.on("friend_status_update", handleFriendStatusUpdate);
+        
+        // Check initial connection status
+        setSocketConnected(socketService.isConnected());
+        
+        socketListenersSetup.current = true;
+      } catch (error) {
+        console.error("Failed to connect socket and setup listeners:", error);
+      }
+    };
+    
+    connectAndSetupListeners();
+  }, [handleSocketConnection, handleSocketDisconnection, handleSocketError, handleNewMessage, handleFriendStatusUpdate]);
+
   // Initialize user and socket connection
   useEffect(() => {
+    if (isInitialized.current) return;
+
     const initializeChat = async () => {
       const currentUser = getUser();
       
@@ -93,19 +146,17 @@ export default function Chat() {
       setUser(currentUser);
       
       try {
-        // Connect socket
-        socketService.connect();
+        // Setup socket listeners first
+        setupSocketListeners();
         
         // Load initial data
         await loadFriends();
         
-        // Set up socket event listeners
-        socketService.on("new_message", handleNewMessage);
-        socketService.on("friend_status_update", handleFriendStatusUpdate);
+        isInitialized.current = true;
         
       } catch (error) {
         console.error("Failed to initialize chat:", error);
-        toast.error("Failed to initialize chat");
+        toast.error("Failed to initialize chat. Please refresh the page.");
       } finally {
         setLoading(false);
       }
@@ -115,11 +166,31 @@ export default function Chat() {
 
     // Cleanup function
     return () => {
-      socketService.off("new_message");
-      socketService.off("friend_status_update");
-      socketService.disconnect();
+      if (isInitialized.current) {
+        socketService.off("connect", handleSocketConnection);
+        socketService.off("disconnect", handleSocketDisconnection);  
+        socketService.off("connect_error", handleSocketError);
+        socketService.off("new_message", handleNewMessage);
+        socketService.off("friend_status_update", handleFriendStatusUpdate);
+        socketService.disconnect();
+        isInitialized.current = false;
+        socketListenersSetup.current = false;
+      }
     };
-  }, [navigate, loadFriends, handleNewMessage, handleFriendStatusUpdate]);
+  }, [navigate, loadFriends, setupSocketListeners, handleSocketConnection, handleSocketDisconnection, handleSocketError, handleNewMessage, handleFriendStatusUpdate]);
+
+  // Monitor socket connection status
+  useEffect(() => {
+    const checkSocketStatus = () => {
+      setSocketConnected(socketService.isConnected());
+    };
+
+    const interval = setInterval(checkSocketStatus, 5000); // Check every 5 seconds
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, []);
 
   const handleFriendSelect = (friend: Friend) => {
     setSelectedFriend(friend);
@@ -139,11 +210,16 @@ export default function Chat() {
         // Add message to local state immediately
         setMessages((prev) => [...prev, response.data.data]);
         
-        // Emit via socket for real-time delivery
-        socketService.emit("send_message", {
-          recipientId: selectedFriend._id,
-          content,
-        });
+        // Emit via socket for real-time delivery only if connected
+        if (socketConnected) {
+          socketService.emit("send_message", {
+            recipientId: selectedFriend._id,
+            content,
+          });
+        }
+
+        // Update friends list to reflect latest message
+        loadFriends();
       }
     } catch (error) {
       console.error("Failed to send message:", error);
@@ -163,9 +239,11 @@ export default function Chat() {
     setShowAddFriend(true);
   };
 
-  const onFriendAdded = () => {
-    loadFriends();
+  const onFriendAdded = async () => {
     setShowAddFriend(false);
+    // Refresh friends list after adding a friend
+    await loadFriends();
+    toast.success("Friends list updated!");
   };
 
   // Loading state
@@ -205,23 +283,39 @@ export default function Chat() {
         <div className="p-4 border-b border-gray-200 flex items-center justify-between">
           <div>
             <h2 className="font-semibold text-gray-900">{user.username}</h2>
-            <p className="text-sm text-gray-500">Online</p>
+            <div className="flex items-center space-x-2">
+              <div className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+              <p className="text-sm text-gray-500">
+                {socketConnected ? 'Connected' : 'Connecting...'}
+              </p>
+            </div>
           </div>
           <div className="flex gap-2">
             <button
               onClick={handleAddFriend}
               className="btn btn-primary text-sm"
+              title="Add Friend"
             >
               Add Friend
             </button>
             <button
               onClick={handleLogout}
               className="btn btn-secondary text-sm"
+              title="Logout"
             >
               Logout
             </button>
           </div>
         </div>
+
+        {/* Connection Status Warning */}
+        {!socketConnected && (
+          <div className="p-2 bg-yellow-50 border-b border-yellow-200">
+            <p className="text-xs text-yellow-800 text-center">
+              Connection issues detected. Messages may not be delivered in real-time.
+            </p>
+          </div>
+        )}
 
         {/* Friends List */}
         <div className="flex-1 overflow-y-auto">
@@ -241,15 +335,26 @@ export default function Chat() {
             <div className="p-4 bg-white border-b border-gray-200">
               <div className="flex items-center">
                 <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center">
-                  {selectedFriend.username[0].toUpperCase()}
+                  {selectedFriend.avatar ? (
+                    <img
+                      src={selectedFriend.avatar}
+                      alt={selectedFriend.username}
+                      className="w-10 h-10 rounded-full object-cover"
+                    />
+                  ) : (
+                    selectedFriend.username[0].toUpperCase()
+                  )}
                 </div>
                 <div className="ml-3">
                   <h3 className="font-semibold text-gray-900">
                     {selectedFriend.username}
                   </h3>
-                  <p className="text-sm text-gray-500">
-                    {selectedFriend.isOnline ? "Online" : "Offline"}
-                  </p>
+                  <div className="flex items-center space-x-1">
+                    <div className={`w-2 h-2 rounded-full ${selectedFriend.isOnline ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+                    <p className="text-sm text-gray-500">
+                      {selectedFriend.isOnline ? "Online" : "Offline"}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -260,7 +365,7 @@ export default function Chat() {
             </div>
 
             {/* Message Input */}
-            <MessageInput onSendMessage={handleSendMessage} />
+            <MessageInput onSendMessage={handleSendMessage} disabled={!socketConnected} />
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center bg-gray-50">
@@ -268,7 +373,18 @@ export default function Chat() {
               <h3 className="text-xl font-semibold text-gray-900 mb-2">
                 Welcome to Chat App
               </h3>
-              <p className="text-gray-600">Select a friend to start chatting</p>
+              <p className="text-gray-600 mb-4">Select a friend to start chatting</p>
+              {friends.length === 0 && (
+                <div className="mt-4">
+                  <p className="text-gray-500 mb-2">You don't have any friends yet</p>
+                  <button
+                    onClick={handleAddFriend}
+                    className="btn btn-primary"
+                  >
+                    Add Your First Friend
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
