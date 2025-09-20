@@ -9,11 +9,11 @@ class SocketService {
   private isConnecting = false;
   private isAuthenticated = false;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
+  private maxReconnectAttempts = 3; // Reduced from 5
   private reconnectTimer: NodeJS.Timeout | null = null;
   private connectionPromise: Promise<void> | null = null;
+  private isManualDisconnect = false;
 
-  // Singleton pattern to prevent multiple instances
   public static getInstance(): SocketService {
     if (!SocketService.instance) {
       SocketService.instance = new SocketService();
@@ -21,7 +21,6 @@ class SocketService {
     return SocketService.instance;
   }
 
-  // Private constructor to enforce singleton
   private constructor() {}
 
   connect(): Promise<void> {
@@ -44,6 +43,7 @@ class SocketService {
     const token = getToken();
     if (!token) {
       console.warn('No token available for socket connection');
+      this.connectionPromise = null;
       throw new Error('No authentication token available');
     }
 
@@ -53,12 +53,21 @@ class SocketService {
       return;
     }
 
+    // Don't reconnect if we've hit the limit
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.warn('Max reconnection attempts reached, not attempting to connect');
+      this.connectionPromise = null;
+      throw new Error('Max reconnection attempts reached');
+    }
+
     // Disconnect existing socket if present
     if (this.socket) {
       console.log('Closing existing socket connection');
+      this.isManualDisconnect = true;
       this.socket.removeAllListeners();
       this.socket.disconnect();
       this.socket = null;
+      this.isManualDisconnect = false;
     }
 
     this.isConnecting = true;
@@ -69,15 +78,17 @@ class SocketService {
       this.socket = io(SOCKET_URL, {
         transports: ['websocket', 'polling'],
         timeout: 10000,
-        forceNew: true, // Always create a fresh connection
-        reconnection: false, // We'll handle reconnection manually
+        forceNew: true,
+        reconnection: false, // We handle reconnection manually
         autoConnect: true,
       });
 
       // Set up one-time connection handlers
       const onConnect = () => {
         console.log('Socket connected, authenticating...');
-        this.socket!.emit('authenticate', token);
+        if (this.socket) {
+          this.socket.emit('authenticate', token);
+        }
       };
 
       const onAuthenticated = (data: any) => {
@@ -88,51 +99,54 @@ class SocketService {
         this.connectionPromise = null;
 
         // Clean up one-time listeners
-        this.socket!.off('connect', onConnect);
-        this.socket!.off('authenticated', onAuthenticated);
-        this.socket!.off('auth_error', onAuthError);
-        this.socket!.off('connect_error', onConnectError);
+        if (this.socket) {
+          this.socket.off('connect', onConnect);
+          this.socket.off('authenticated', onAuthenticated);
+          this.socket.off('auth_error', onAuthError);
+          this.socket.off('connect_error', onConnectError);
+        }
 
         resolve();
       };
 
       const onAuthError = (error: any) => {
         console.error('Socket authentication error:', error);
-        this.isConnecting = false;
-        this.isAuthenticated = false;
-        this.connectionPromise = null;
-        
-        // Clean up listeners
-        this.socket!.off('connect', onConnect);
-        this.socket!.off('authenticated', onAuthenticated);
-        this.socket!.off('auth_error', onAuthError);
-        this.socket!.off('connect_error', onConnectError);
-        
+        this.cleanup();
         reject(new Error('Authentication failed'));
       };
 
       const onConnectError = (error: any) => {
         console.error('Socket connection error:', error);
-        this.isConnecting = false;
-        this.connectionPromise = null;
-        
-        // Clean up listeners
-        this.socket!.off('connect', onConnect);
-        this.socket!.off('authenticated', onAuthenticated);
-        this.socket!.off('auth_error', onAuthError);
-        this.socket!.off('connect_error', onConnectError);
-        
+        this.cleanup();
         reject(error);
       };
 
+      const cleanup = () => {
+        this.isConnecting = false;
+        this.isAuthenticated = false;
+        this.connectionPromise = null;
+        
+        if (this.socket) {
+          this.socket.off('connect', onConnect);
+          this.socket.off('authenticated', onAuthenticated);
+          this.socket.off('auth_error', onAuthError);
+          this.socket.off('connect_error', onConnectError);
+        }
+      };
+
       // Set up one-time event listeners
-      this.socket.once('connect', onConnect);
-      this.socket.once('authenticated', onAuthenticated);
-      this.socket.once('auth_error', onAuthError);
-      this.socket.once('connect_error', onConnectError);
+      if (this.socket) {
+        this.socket.once('connect', onConnect);
+        this.socket.once('authenticated', onAuthenticated);
+        this.socket.once('auth_error', onAuthError);
+        this.socket.once('connect_error', onConnectError);
+      }
 
       // Set up persistent event listeners
       this.setupPersistentEventListeners();
+
+      // Cleanup function for this promise
+      this.cleanup = cleanup;
     });
   }
 
@@ -145,17 +159,10 @@ class SocketService {
       this.isAuthenticated = false;
       this.connectionPromise = null;
       
-      // Only attempt reconnection if it wasn't a manual disconnect
-      if (reason !== 'io client disconnect') {
+      // Only attempt reconnection if it wasn't a manual disconnect and we haven't hit the limit
+      if (!this.isManualDisconnect && reason !== 'io client disconnect' && this.reconnectAttempts < this.maxReconnectAttempts) {
         this.handleReconnection();
       }
-    });
-
-    // Handle server-initiated reconnection
-    this.socket.on('reconnect', () => {
-      console.log('Reconnected to server');
-      this.reconnectAttempts = 0;
-      this.isConnecting = false;
     });
   }
 
@@ -171,19 +178,21 @@ class SocketService {
     }
 
     this.reconnectAttempts++;
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 30000);
+    const delay = Math.min(2000 * this.reconnectAttempts, 10000); // Max 10 second delay
     
-    console.log(`Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`);
+    console.log(`Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
     
     this.reconnectTimer = setTimeout(() => {
       this.connect().catch(error => {
         console.error('Reconnection failed:', error);
+        // Don't retry immediately, let the disconnect handler decide
       });
     }, delay);
   }
 
   disconnect() {
     console.log('Manually disconnecting socket');
+    this.isManualDisconnect = true;
     
     // Clear reconnection timer
     if (this.reconnectTimer) {
@@ -203,6 +212,8 @@ class SocketService {
       this.socket.disconnect();
       this.socket = null;
     }
+
+    this.isManualDisconnect = false;
   }
 
   emit(event: string, data: any) {
@@ -214,12 +225,10 @@ class SocketService {
   }
 
   on(event: string, callback: (data: any) => void) {
-    // If socket exists, add the listener
     if (this.socket) {
       this.socket.on(event, callback);
     } else {
-      // If socket doesn't exist yet, warn but don't fail
-      console.warn(`Cannot listen to ${event}: Socket not initialized yet. Event will be added when socket connects.`);
+      console.warn(`Cannot listen to ${event}: Socket not initialized yet`);
     }
   }
 
@@ -241,12 +250,9 @@ class SocketService {
     return this.socket;
   }
 
-  // Method to force reset (for development/debugging)
-  forceReset() {
-    console.log('Force resetting socket service');
-    this.disconnect();
-    // Clear the singleton instance to allow fresh creation
-    SocketService.instance = null;
+  // Method to reset reconnection attempts (useful after successful operations)
+  resetReconnectionAttempts() {
+    this.reconnectAttempts = 0;
   }
 
   // Get connection status details
@@ -256,6 +262,7 @@ class SocketService {
       authenticated: this.isAuthenticated,
       connecting: this.isConnecting,
       reconnectAttempts: this.reconnectAttempts,
+      maxReconnectAttempts: this.maxReconnectAttempts,
     };
   }
 }
