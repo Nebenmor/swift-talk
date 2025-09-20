@@ -5,7 +5,7 @@ import { AuthRequest } from '../types';
 
 export class UserController {
   static readonly searchUsers = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     const { q: query, limit } = req.query;
     
     if (!query || typeof query !== 'string') {
@@ -46,7 +46,7 @@ export class UserController {
   });
 
   static readonly getFriends = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     
     const friends = await UserService.getFriends(userId);
     
@@ -54,7 +54,7 @@ export class UserController {
   });
 
   static readonly getFriendsWithMessages = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     
     const friends = await UserService.getFriendsWithLastMessage(userId);
     
@@ -62,21 +62,47 @@ export class UserController {
   });
 
   static readonly sendFriendRequest = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    console.log('=== FRIEND REQUEST DEBUG ===');
+    console.log('Requester ID:', req.user!._id);
+    console.log('Request body:', req.body);
+    
+    const userId = req.user!._id;
     const { username } = req.body;
     
-    await UserService.sendFriendRequest(userId, username);
-    
-    ResponseUtil.success(
-      res,
-      null,
-      'Friend request sent successfully',
-      201
-    );
+    try {
+      await UserService.sendFriendRequest(userId, username);
+      console.log('Friend request sent successfully');
+      
+      ResponseUtil.success(
+        res,
+        null,
+        'Friend request sent successfully',
+        201
+      );
+    } catch (error: any) {
+      console.error('Friend request error:', error);
+      
+      // Provide user-friendly error messages with appropriate status codes
+      let statusCode = 400; // Default to client error
+      let message = error.message || 'Failed to send friend request';
+      
+      // Categorize errors for better user experience
+      if (message.includes('User not found')) {
+        statusCode = 404;
+      } else if (message.includes('already sent') || message.includes('already friends') || message.includes('already sent you')) {
+        statusCode = 409; // Conflict
+      } else if (message.includes('Cannot send friend request to this user') || message.includes('blocked')) {
+        statusCode = 403; // Forbidden
+      } else if (message.includes('Cannot send friend request to yourself')) {
+        statusCode = 400; // Bad request
+      }
+      
+      return ResponseUtil.error(res, message, statusCode);
+    }
   });
 
   static readonly getPendingRequests = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     
     const requests = await UserService.getPendingFriendRequests(userId);
     
@@ -84,7 +110,7 @@ export class UserController {
   });
 
   static readonly getSentRequests = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     
     const requests = await UserService.getSentFriendRequests(userId);
     
@@ -92,43 +118,81 @@ export class UserController {
   });
 
   static readonly acceptFriendRequest = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     const { requestId } = req.params;
     
-    await UserService.acceptFriendRequest(userId, requestId);
-    
-    ResponseUtil.success(res, null, 'Friend request accepted');
+    try {
+      await UserService.acceptFriendRequest(userId, requestId);
+      ResponseUtil.success(res, null, 'Friend request accepted');
+    } catch (error: any) {
+      let statusCode = 400;
+      if (error.message.includes('not found')) {
+        statusCode = 404;
+      } else if (error.message.includes('not authorized')) {
+        statusCode = 403;
+      } else if (error.message.includes('already processed')) {
+        statusCode = 409;
+      }
+      
+      return ResponseUtil.error(res, error.message, statusCode);
+    }
   });
 
   static readonly declineFriendRequest = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     const { requestId } = req.params;
     
-    await UserService.declineFriendRequest(userId, requestId);
-    
-    ResponseUtil.success(res, null, 'Friend request declined');
+    try {
+      await UserService.declineFriendRequest(userId, requestId);
+      ResponseUtil.success(res, null, 'Friend request declined');
+    } catch (error: any) {
+      let statusCode = 400;
+      if (error.message.includes('not found')) {
+        statusCode = 404;
+      } else if (error.message.includes('not authorized')) {
+        statusCode = 403;
+      } else if (error.message.includes('already processed')) {
+        statusCode = 409;
+      }
+      
+      return ResponseUtil.error(res, error.message, statusCode);
+    }
   });
 
   static readonly removeFriend = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     const { friendId } = req.params;
     
-    await UserService.removeFriend(userId, friendId);
-    
-    ResponseUtil.success(res, null, 'Friend removed successfully');
+    try {
+      await UserService.removeFriend(userId, friendId);
+      ResponseUtil.success(res, null, 'Friend removed successfully');
+    } catch (error: any) {
+      const statusCode = error.message.includes('not found') ? 404 : 400;
+      return ResponseUtil.error(res, error.message, statusCode);
+    }
   });
 
   static readonly blockUser = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     const { userId: blockedId } = req.params;
     
-    await UserService.blockUser(userId, blockedId);
-    
-    ResponseUtil.success(res, null, 'User blocked successfully');
+    try {
+      await UserService.blockUser(userId, blockedId);
+      ResponseUtil.success(res, null, 'User blocked successfully');
+    } catch (error: any) {
+      let statusCode = 400;
+      if (error.message.includes('Cannot block yourself')) {
+        statusCode = 400;
+      } else if (error.message.includes('already blocked')) {
+        statusCode = 409;
+      }
+      
+      return ResponseUtil.error(res, error.message, statusCode);
+    }
   });
 
   static readonly getOnlineFriends = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     
     const onlineFriends = await UserService.getOnlineFriends(userId);
     
@@ -136,7 +200,7 @@ export class UserController {
   });
 
   static readonly getFriendshipStatus = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     const { userId: otherUserId } = req.params;
     
     const status = await UserService.getFriendshipStatus(userId, otherUserId);
@@ -145,7 +209,7 @@ export class UserController {
   });
 
   static readonly getUserStats = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     
     const stats = await UserService.getUserStats(userId);
     
@@ -153,7 +217,7 @@ export class UserController {
   });
 
   static readonly updateOnlineStatus = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     const { isOnline } = req.body;
     
     if (typeof isOnline !== 'boolean') {
