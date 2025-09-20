@@ -5,7 +5,7 @@ import { AuthRequest } from '../types';
 
 export class ChatController {
   static readonly sendMessage = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const senderId = req.user!._id!;
+    const senderId = req.user!._id;
     const { recipient, content, messageType = 'text' } = req.body;
     
     const message = await ChatService.sendMessage(
@@ -24,7 +24,7 @@ export class ChatController {
   });
 
   static readonly sendFileMessage = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const senderId = req.user!._id!;
+    const senderId = req.user!._id;
     const { recipient } = req.body;
     const file = req.file;
     
@@ -57,7 +57,7 @@ export class ChatController {
   });
 
   static readonly getChatHistory = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     const { userId: otherUserId } = req.params;
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 50;
@@ -78,7 +78,7 @@ export class ChatController {
   });
 
   static readonly markMessagesAsRead = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const recipientId = req.user!._id!;
+    const recipientId = req.user!._id;
     const { userId: senderId } = req.params;
     
     await ChatService.markMessagesAsRead(senderId, recipientId);
@@ -87,7 +87,7 @@ export class ChatController {
   });
 
   static readonly getUnreadCount = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     const senderId = req.query.senderId as string;
     
     const count = await ChatService.getUnreadMessagesCount(userId, senderId);
@@ -96,7 +96,7 @@ export class ChatController {
   });
 
   static readonly deleteMessage = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     const { messageId } = req.params;
     
     await ChatService.deleteMessage(messageId, userId);
@@ -105,7 +105,7 @@ export class ChatController {
   });
 
   static readonly searchMessages = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     const { q: query, userId: otherUserId } = req.query;
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
@@ -131,7 +131,7 @@ export class ChatController {
   });
 
   static readonly getChatRooms = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     
     const chatRooms = await ChatService.getChatRooms(userId);
     
@@ -151,7 +151,7 @@ export class ChatController {
   });
 
   static readonly uploadFile = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    const userId = req.user!._id;
     const file = req.file;
     
     if (!file) {
