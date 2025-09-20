@@ -185,13 +185,23 @@ export class UserService {
     userId: string,
     requestId: string
   ): Promise<void> {
+    console.log(`=== ACCEPT REQUEST DEBUG ===`);
+    console.log(`User ID: ${userId}`);
+    console.log(`Request ID: ${requestId}`);
+    
     const friendship = await Friendship.findById(requestId);
+    console.log(`Found friendship:`, friendship);
     
     if (!friendship) {
       throw new Error('Friend request not found');
     }
 
-    if (friendship.recipient.toString() !== userId) {
+    console.log(`Friendship recipient: ${friendship.recipient.toString()}`);
+    console.log(`User ID: ${userId}`);
+    console.log(`Recipients match: ${friendship.recipient.toString() === userId}`);
+
+    // FIX: Convert both to strings for comparison
+    if (friendship.recipient.toString() !== userId.toString()) {
       throw new Error('You are not authorized to accept this friend request');
     }
 
@@ -201,13 +211,19 @@ export class UserService {
 
     friendship.status = 'accepted';
     await friendship.save();
+    console.log('Friend request accepted successfully');
   }
 
   static async declineFriendRequest(
     userId: string,
     requestId: string
   ): Promise<{ message: string }> {
+    console.log(`=== DECLINE REQUEST DEBUG ===`);
+    console.log(`User ID: ${userId}`);
+    console.log(`Request ID: ${requestId}`);
+    
     const friendship = await Friendship.findById(requestId);
+    console.log(`Found friendship:`, friendship);
     
     if (!friendship) {
       throw new Error('Friend request not found');
@@ -217,16 +233,24 @@ export class UserService {
       throw new Error('This friend request has already been processed');
     }
 
+    // FIX: Convert both to strings for comparison
+    console.log(`Friendship recipient: ${friendship.recipient.toString()}`);
+    console.log(`Friendship requester: ${friendship.requester.toString()}`);
+    console.log(`User ID: ${userId}`);
+
     // Check if user is declining a request they received or canceling one they sent
-    if (friendship.recipient.toString() === userId) {
+    if (friendship.recipient.toString() === userId.toString()) {
       // User is declining a request they received
       await Friendship.findByIdAndDelete(requestId);
+      console.log('Friend request declined by recipient');
       return { message: 'Friend request declined' };
-    } else if (friendship.requester.toString() === userId) {
+    } else if (friendship.requester.toString() === userId.toString()) {
       // User is canceling a request they sent
       await Friendship.findByIdAndDelete(requestId);
+      console.log('Friend request cancelled by requester');
       return { message: 'Friend request cancelled' };
     } else {
+      console.log('Authorization failed - user is neither requester nor recipient');
       throw new Error('You are not authorized to decline this friend request');
     }
   }
