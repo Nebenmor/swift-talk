@@ -20,6 +20,11 @@ export const authenticate = async (
     const token = extractTokenFromHeader(authHeader);
     const decoded = verifyToken(token);
 
+    console.log('=== AUTH MIDDLEWARE DEBUG ===');
+    console.log('Decoded token payload:', decoded);
+    console.log('User ID from token:', decoded.userId);
+    console.log('User ID type:', typeof decoded.userId);
+
     // Fetch user from database to ensure they still exist
     const user = await User.findById(decoded.userId).select('-password');
     
@@ -28,11 +33,24 @@ export const authenticate = async (
       return;
     }
 
-    // Attach user to request object
-    req.user = user.toObject();
+    console.log('Found user:', user._id);
+    console.log('User _id type:', typeof user._id);
+    console.log('User _id toString:', user._id.toString());
+
+    // Attach user to request object - ENSURE _id is a string
+    const userObj = user.toObject();
+    req.user = {
+      ...userObj,
+      _id: user._id.toString(), // Force convert to string
+    };
+
+    console.log('Set req.user._id to:', req.user._id);
+    console.log('req.user._id type:', typeof req.user._id);
+    
     next();
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Authentication failed';
+    console.error('Auth middleware error:', errorMessage);
     ResponseUtil.unauthorized(res, errorMessage);
   }
 };
@@ -51,7 +69,11 @@ export const optionalAuth = async (
       
       const user = await User.findById(decoded.userId).select('-password');
       if (user) {
-        req.user = user.toObject();
+        const userObj = user.toObject();
+        req.user = {
+          ...userObj,
+          _id: user._id.toString(), // Force convert to string
+        };
       }
     }
     
