@@ -10,7 +10,10 @@ export const hashPassword = async (password: string): Promise<string> => {
   }
 };
 
-export const comparePassword = async (password: string, hashedPassword: string): Promise<boolean> => {
+export const comparePassword = async (
+  password: string,
+  hashedPassword: string
+): Promise<boolean> => {
   try {
     return await bcrypt.compare(password, hashedPassword);
   } catch (error) {
@@ -24,31 +27,31 @@ export interface PasswordValidation {
   errors: string[];
 }
 
-export const validatePasswordStrength = (password: string): PasswordValidation => {
+export const validatePasswordStrength = (
+  password: string
+): PasswordValidation => {
   const errors: string[] = [];
-  
+
   if (password.length < 8) {
     errors.push('Password must be at least 8 characters long');
   }
-  
+
   if (!/(?=.*[a-z])/.test(password)) {
     errors.push('Password must contain at least one lowercase letter');
   }
-  
+
   if (!/(?=.*[A-Z])/.test(password)) {
     errors.push('Password must contain at least one uppercase letter');
   }
-  
+
   if (!/(?=.*\d)/.test(password)) {
     errors.push('Password must contain at least one number');
   }
-  
-  if (!/(?=.*[@$!%*?&])/.test(password)) {
-    errors.push('Password must contain at least one special character (@$!%*?&)');
-  }
-  
+
+  // Remove the special character requirement to match User model
+
   return {
     isValid: errors.length === 0,
-    errors
+    errors,
   };
 };
