@@ -18,6 +18,7 @@ export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [showFriendRequests, setShowFriendRequests] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [socketConnected, setSocketConnected] = useState(false);
   const navigate = useNavigate();
@@ -42,7 +43,12 @@ export default function Chat() {
     try {
       const response = await api.get(`/chat/history/${friendId}`);
       if (response.data.success) {
-        setMessages(response.data.data.data || []);
+        // Remove duplicates based on message ID
+        const uniqueMessages = response.data.data.data?.filter((msg: Message, index: number, arr: Message[]) => 
+          arr.findIndex(m => m._id === msg._id) === index
+        ) || [];
+        
+        setMessages(uniqueMessages);
         
         // Mark messages as read
         try {
@@ -59,20 +65,32 @@ export default function Chat() {
 
   // Handle new message from socket
   const handleNewMessage = useCallback((message: Message) => {
-    if (
-      selectedFriend &&
-      (message.sender._id === selectedFriend._id ||
-        message.recipient === selectedFriend._id)
-    ) {
-      setMessages((prev) => [...prev, message]);
+    console.log('New message received:', message);
+    
+    // Only add message if it's for the current chat
+    if (selectedFriend && 
+        (message.sender._id === selectedFriend._id || message.recipient === selectedFriend._id)) {
+      
+      setMessages(prevMessages => {
+        // Check if message already exists to prevent duplicates
+        const messageExists = prevMessages.some(msg => msg._id === message._id);
+        if (messageExists) {
+          return prevMessages;
+        }
+        
+        // Add new message
+        return [...prevMessages, message];
+      });
     }
     
-    // Update friends list to show latest message
+    // Always update friends list to show latest message
     loadFriends();
     
-    // Only show toast for messages from others
+    // Only show toast for messages from others and if not in current chat
     if (message.sender._id !== user?._id) {
-      toast.success(`New message from ${message.sender.username}`);
+      if (!selectedFriend || selectedFriend._id !== message.sender._id) {
+        toast.success(`New message from ${message.sender.username}`);
+      }
     }
   }, [selectedFriend, user?._id, loadFriends]);
 
@@ -84,8 +102,13 @@ export default function Chat() {
           friend._id === userId ? { ...friend, isOnline } : friend
         )
       );
+      
+      // Update selected friend status as well
+      if (selectedFriend && selectedFriend._id === userId) {
+        setSelectedFriend(prev => prev ? { ...prev, isOnline } : null);
+      }
     },
-    []
+    [selectedFriend]
   );
 
   // Handle socket connection
@@ -108,22 +131,17 @@ export default function Chat() {
   const setupSocketListeners = useCallback(() => {
     if (socketListenersSetup.current) return;
     
-    // Wait for socket to be connected before setting up listeners
     const connectAndSetupListeners = async () => {
       try {
-        // Connect socket first
         await socketService.connect();
         
-        // Now setup listeners on the connected socket
         socketService.on("connect", handleSocketConnection);
         socketService.on("disconnect", handleSocketDisconnection);
         socketService.on("connect_error", handleSocketError);
         socketService.on("new_message", handleNewMessage);
         socketService.on("friend_status_update", handleFriendStatusUpdate);
         
-        // Check initial connection status
         setSocketConnected(socketService.isConnected());
-        
         socketListenersSetup.current = true;
       } catch (error) {
         console.error("Failed to connect socket and setup listeners:", error);
@@ -148,14 +166,9 @@ export default function Chat() {
       setUser(currentUser);
       
       try {
-        // Setup socket listeners first
         setupSocketListeners();
-        
-        // Load initial data
         await loadFriends();
-        
         isInitialized.current = true;
-        
       } catch (error) {
         console.error("Failed to initialize chat:", error);
         toast.error("Failed to initialize chat. Please refresh the page.");
@@ -166,7 +179,6 @@ export default function Chat() {
 
     initializeChat();
 
-    // Cleanup function
     return () => {
       if (isInitialized.current) {
         socketService.off("connect", handleSocketConnection);
@@ -187,16 +199,15 @@ export default function Chat() {
       setSocketConnected(socketService.isConnected());
     };
 
-    const interval = setInterval(checkSocketStatus, 5000); // Check every 5 seconds
-
-    return () => {
-      clearInterval(interval);
-    };
+    const interval = setInterval(checkSocketStatus, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleFriendSelect = (friend: Friend) => {
     setSelectedFriend(friend);
     loadMessages(friend._id);
+    // Close sidebar on mobile after selecting friend
+    setSidebarOpen(false);
   };
 
   const handleSendMessage = async (content: string) => {
@@ -209,10 +220,18 @@ export default function Chat() {
       });
 
       if (response.data.success) {
-        // Add message to local state immediately
-        setMessages((prev) => [...prev, response.data.data]);
+        const newMessage = response.data.data;
         
-        // Emit via socket for real-time delivery only if connected
+        // Add message to local state immediately to avoid waiting for socket
+        setMessages(prevMessages => {
+          const messageExists = prevMessages.some(msg => msg._id === newMessage._id);
+          if (!messageExists) {
+            return [...prevMessages, newMessage];
+          }
+          return prevMessages;
+        });
+        
+        // Emit via socket for real-time delivery to other user
         if (socketConnected) {
           socketService.emit("send_message", {
             recipientId: selectedFriend._id,
@@ -221,7 +240,7 @@ export default function Chat() {
         }
 
         // Update friends list to reflect latest message
-        loadFriends();
+        setTimeout(loadFriends, 100); // Small delay to ensure backend is updated
       }
     } catch (error) {
       console.error("Failed to send message:", error);
@@ -247,22 +266,24 @@ export default function Chat() {
 
   const onFriendAdded = async () => {
     setShowAddFriend(false);
-    // Refresh friends list after adding a friend
     await loadFriends();
     toast.success("Friends list updated!");
   };
 
   const onRequestHandled = async () => {
     setShowFriendRequests(false);
-    // Refresh friends list after handling requests
     await loadFriends();
     toast.success("Friends list updated!");
+  };
+
+  const toggleSidebar = () => {
+    setSidebarOpen(!sidebarOpen);
   };
 
   // Loading state
   if (loading) {
     return (
-      <div className="h-screen flex items-center justify-center">
+      <div className="h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading chat...</p>
@@ -274,12 +295,12 @@ export default function Chat() {
   // No user found
   if (!user) {
     return (
-      <div className="h-screen flex items-center justify-center">
+      <div className="h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <p className="text-red-600">No user session found</p>
+          <p className="text-red-600 mb-4">No user session found</p>
           <button
             onClick={() => navigate('/login')}
-            className="btn btn-primary mt-4"
+            className="btn btn-primary"
           >
             Go to Login
           </button>
@@ -289,43 +310,80 @@ export default function Chat() {
   }
 
   return (
-    <div className="h-screen flex">
+    <div className="h-screen flex bg-gray-50 overflow-hidden">
+      {/* Mobile sidebar overlay */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <div className="w-1/3 bg-white border-r border-gray-200 flex flex-col">
+      <div className={`
+        fixed inset-y-0 left-0 z-50 w-80 bg-white border-r border-gray-200 flex flex-col transform transition-transform duration-300 ease-in-out
+        lg:relative lg:translate-x-0 lg:w-1/3 lg:max-w-sm
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+      `}>
         {/* Header */}
         <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-          <div>
-            <h2 className="font-semibold text-gray-900">{user.username}</h2>
-            <div className="flex items-center space-x-2">
-              <div className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-              <p className="text-sm text-gray-500">
-                {socketConnected ? 'Connected' : 'Connecting...'}
-              </p>
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center">
+              {user.avatar ? (
+                <img
+                  src={user.avatar}
+                  alt={user.username}
+                  className="w-10 h-10 rounded-full object-cover"
+                />
+              ) : (
+                user.username[0].toUpperCase()
+              )}
+            </div>
+            <div>
+              <h2 className="font-semibold text-gray-900 text-sm md:text-base">{user.username}</h2>
+              <div className="flex items-center space-x-2">
+                <div className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                <p className="text-xs text-gray-500">
+                  {socketConnected ? 'Connected' : 'Connecting...'}
+                </p>
+              </div>
             </div>
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={handleShowFriendRequests}
-              className="btn btn-secondary text-sm"
-              title="Friend Requests"
-            >
-              Requests
-            </button>
-            <button
-              onClick={handleAddFriend}
-              className="btn btn-primary text-sm"
-              title="Add Friend"
-            >
-              Add Friend
-            </button>
-            <button
-              onClick={handleLogout}
-              className="btn btn-secondary text-sm"
-              title="Logout"
-            >
-              Logout
-            </button>
-          </div>
+          
+          {/* Close button for mobile */}
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="lg:hidden p-2 text-gray-500 hover:text-gray-700"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Action buttons */}
+        <div className="p-3 border-b border-gray-200 flex gap-2">
+          <button
+            onClick={handleShowFriendRequests}
+            className="btn btn-secondary text-xs flex-1"
+            title="Friend Requests"
+          >
+            Requests
+          </button>
+          <button
+            onClick={handleAddFriend}
+            className="btn btn-primary text-xs flex-1"
+            title="Add Friend"
+          >
+            Add Friend
+          </button>
+          <button
+            onClick={handleLogout}
+            className="btn btn-secondary text-xs px-3"
+            title="Logout"
+          >
+            Logout
+          </button>
         </div>
 
         {/* Connection Status Warning */}
@@ -347,14 +405,24 @@ export default function Chat() {
         </div>
       </div>
 
-      {/* Chat Area */}
-      <div className="flex-1 flex flex-col">
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col min-w-0">
         {selectedFriend ? (
           <>
             {/* Chat Header */}
-            <div className="p-4 bg-white border-b border-gray-200">
-              <div className="flex items-center">
-                <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center">
+            <div className="p-4 bg-white border-b border-gray-200 flex items-center justify-between">
+              {/* Mobile menu button */}
+              <button
+                onClick={toggleSidebar}
+                className="lg:hidden p-2 text-gray-500 hover:text-gray-700 mr-3"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+
+              <div className="flex items-center flex-1 min-w-0">
+                <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center flex-shrink-0">
                   {selectedFriend.avatar ? (
                     <img
                       src={selectedFriend.avatar}
@@ -365,8 +433,8 @@ export default function Chat() {
                     selectedFriend.username[0].toUpperCase()
                   )}
                 </div>
-                <div className="ml-3">
-                  <h3 className="font-semibold text-gray-900">
+                <div className="ml-3 flex-1 min-w-0">
+                  <h3 className="font-semibold text-gray-900 truncate">
                     {selectedFriend.username}
                   </h3>
                   <div className="flex items-center space-x-1">
@@ -380,18 +448,31 @@ export default function Chat() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto">
-              <MessageList messages={messages} currentUserId={user._id} />
-            </div>
+            <MessageList messages={messages} currentUserId={user._id} />
 
             {/* Message Input */}
             <MessageInput onSendMessage={handleSendMessage} disabled={!socketConnected} />
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center bg-gray-50">
-            <div className="text-center">
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">
-                Welcome to Chat App
+          <div className="flex-1 flex items-center justify-center p-4">
+            {/* Mobile menu button */}
+            <button
+              onClick={toggleSidebar}
+              className="lg:hidden fixed top-4 left-4 p-3 bg-blue-600 text-white rounded-full shadow-lg z-30"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+
+            <div className="text-center max-w-md mx-auto">
+              <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">
+                Welcome to SwiftTalk
               </h3>
               <p className="text-gray-600 mb-4">Select a friend to start chatting</p>
               {friends.length === 0 && (
