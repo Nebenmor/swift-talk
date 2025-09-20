@@ -206,23 +206,29 @@ export class UserService {
   static async declineFriendRequest(
     userId: string,
     requestId: string
-  ): Promise<void> {
+  ): Promise<{ message: string }> {
     const friendship = await Friendship.findById(requestId);
     
     if (!friendship) {
       throw new Error('Friend request not found');
     }
 
-    if (friendship.recipient.toString() !== userId) {
-      throw new Error('You are not authorized to decline this friend request');
-    }
-
     if (friendship.status !== 'pending') {
       throw new Error('This friend request has already been processed');
     }
 
-    // Delete the friendship request instead of marking as declined
-    await Friendship.findByIdAndDelete(requestId);
+    // Check if user is declining a request they received or canceling one they sent
+    if (friendship.recipient.toString() === userId) {
+      // User is declining a request they received
+      await Friendship.findByIdAndDelete(requestId);
+      return { message: 'Friend request declined' };
+    } else if (friendship.requester.toString() === userId) {
+      // User is canceling a request they sent
+      await Friendship.findByIdAndDelete(requestId);
+      return { message: 'Friend request cancelled' };
+    } else {
+      throw new Error('You are not authorized to decline this friend request');
+    }
   }
 
   static async removeFriend(
