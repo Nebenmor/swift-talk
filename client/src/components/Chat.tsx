@@ -8,6 +8,7 @@ import AddFriend from "./AddFriend";
 import FriendRequests from "./FriendRequests";
 import { getUser, removeToken, removeUser } from "../lib/auth";
 import { socketService } from "../lib/socket";
+import { NotificationService } from "../lib/NotificationService";
 import api from "../lib/api";
 import type { User, Friend, Message } from "../types";
 
@@ -86,10 +87,22 @@ export default function Chat() {
     // Always update friends list to show latest message
     loadFriends();
     
-    // Only show toast for messages from others and if not in current chat
+    // Show notifications for messages from others
     if (message.sender._id !== user?._id) {
+      // Show desktop notification
+      const isFile = message.messageType === 'file';
+      NotificationService.showMessageNotification(
+        message.sender.username,
+        message.content,
+        isFile
+      );
+      
+      // Show toast only if not in current chat
       if (!selectedFriend || selectedFriend._id !== message.sender._id) {
-        toast.success(`New message from ${message.sender.username}`);
+        toast.success(`💬 New message from ${message.sender.username}`, {
+          icon: '🔔',
+          duration: 4000,
+        });
       }
     }
   }, [selectedFriend, user?._id, loadFriends]);
@@ -107,8 +120,16 @@ export default function Chat() {
       if (selectedFriend && selectedFriend._id === userId) {
         setSelectedFriend(prev => prev ? { ...prev, isOnline } : null);
       }
+
+      // Show notification for friends coming online (less intrusive)
+      if (isOnline) {
+        const friend = friends.find(f => f._id === userId);
+        if (friend) {
+          NotificationService.showFriendOnlineNotification(friend.username);
+        }
+      }
     },
-    [selectedFriend]
+    [selectedFriend, friends]
   );
 
   // Handle socket connection
@@ -166,6 +187,9 @@ export default function Chat() {
       setUser(currentUser);
       
       try {
+        // Initialize notifications
+        await NotificationService.requestPermission();
+        
         setupSocketListeners();
         await loadFriends();
         isInitialized.current = true;
@@ -210,14 +234,24 @@ export default function Chat() {
     setSidebarOpen(false);
   };
 
-  const handleSendMessage = async (content: string) => {
+  const handleSendMessage = async (content: string, messageType: 'text' | 'file' = 'text', fileData?: any) => {
     if (!selectedFriend || !user) return;
 
     try {
-      const response = await api.post('/chat/messages', {
+      const requestData: any = {
         recipient: selectedFriend._id,
         content,
-      });
+        messageType,
+      };
+
+      // Add file data if it's a file message
+      if (messageType === 'file' && fileData) {
+        requestData.fileUrl = fileData.fileUrl;
+        requestData.fileName = fileData.fileName;
+        requestData.fileSize = fileData.fileSize;
+      }
+
+      const response = await api.post('/chat/messages', requestData);
 
       if (response.data.success) {
         const newMessage = response.data.data;
@@ -233,10 +267,17 @@ export default function Chat() {
         
         // Emit via socket for real-time delivery to other user
         if (socketConnected) {
-          socketService.emit("send_message", {
+          const socketData: any = {
             recipientId: selectedFriend._id,
             content,
-          });
+            messageType,
+          };
+
+          if (messageType === 'file' && fileData) {
+            socketData.fileData = fileData;
+          }
+
+          socketService.emit("send_message", socketData);
         }
 
         // Update friends list to reflect latest message
@@ -244,7 +285,7 @@ export default function Chat() {
       }
     } catch (error) {
       console.error("Failed to send message:", error);
-      toast.error("Failed to send message");
+      toast.error("Failed to send message via SwiftTalk");
     }
   };
 
