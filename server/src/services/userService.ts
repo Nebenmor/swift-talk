@@ -100,24 +100,43 @@ export class UserService {
     if (existingFriendship) {
       switch (existingFriendship.status) {
         case 'pending':
-          throw new Error('Friend request already sent');
+          // Check who sent the original request
+          if (existingFriendship.requester.toString() === requesterId) {
+            throw new Error('You have already sent a friend request to this user');
+          } else {
+            throw new Error('This user has already sent you a friend request. Please check your pending requests and accept it instead.');
+          }
         case 'accepted':
-          throw new Error('Already friends');
+          throw new Error('You are already friends with this user');
         case 'declined':
-          throw new Error('Friend request was declined');
+          // Allow sending a new request if the previous one was declined
+          // But only if enough time has passed (optional: add time check)
+          await Friendship.findByIdAndDelete(existingFriendship._id);
+          break;
         case 'blocked':
-          throw new Error('Cannot send friend request');
+          throw new Error('Cannot send friend request to this user');
       }
     }
 
-    // Create friend request
-    const friendship = new Friendship({
-      requester: requesterId,
-      recipient: recipient._id,
-      status: 'pending',
-    });
+    // Create friend request with better error handling
+    try {
+      const friendship = new Friendship({
+        requester: requesterId,
+        recipient: recipient._id,
+        status: 'pending',
+      });
 
-    await friendship.save();
+      await friendship.save();
+    } catch (error: any) {
+      // Handle mongoose duplicate key error more gracefully
+      if (error.code === 11000) {
+        // This shouldn't happen due to our check above, but handle it anyway
+        throw new Error('A friend request already exists between you and this user');
+      }
+      
+      // Re-throw other errors
+      throw error;
+    }
   }
 
   static async getPendingFriendRequests(userId: string) {
@@ -126,10 +145,19 @@ export class UserService {
       recipient: userId,
       status: 'pending'
     })
-    .populate('requester', 'username avatar')
+    .populate('requester', 'username email avatar isOnline lastSeen')
     .lean();
 
-    return pendingRequests;
+    return pendingRequests.map((request: any) => ({
+      _id: request.requester._id,
+      username: request.requester.username,
+      email: request.requester.email,
+      avatar: request.requester.avatar,
+      isOnline: request.requester.isOnline,
+      lastSeen: request.requester.lastSeen,
+      requestId: request._id,
+      requestedAt: request.createdAt,
+    }));
   }
 
   static async getSentFriendRequests(userId: string) {
@@ -138,10 +166,19 @@ export class UserService {
       requester: userId,
       status: 'pending'
     })
-    .populate('recipient', 'username avatar')
+    .populate('recipient', 'username email avatar isOnline lastSeen')
     .lean();
 
-    return sentRequests;
+    return sentRequests.map((request: any) => ({
+      _id: request.recipient._id,
+      username: request.recipient.username,
+      email: request.recipient.email,
+      avatar: request.recipient.avatar,
+      isOnline: request.recipient.isOnline,
+      lastSeen: request.recipient.lastSeen,
+      requestId: request._id,
+      requestedAt: request.createdAt,
+    }));
   }
 
   static async acceptFriendRequest(
@@ -155,11 +192,11 @@ export class UserService {
     }
 
     if (friendship.recipient.toString() !== userId) {
-      throw new Error('Not authorized to accept this request');
+      throw new Error('You are not authorized to accept this friend request');
     }
 
     if (friendship.status !== 'pending') {
-      throw new Error('Request already processed');
+      throw new Error('This friend request has already been processed');
     }
 
     friendship.status = 'accepted';
@@ -177,13 +214,14 @@ export class UserService {
     }
 
     if (friendship.recipient.toString() !== userId) {
-      throw new Error('Not authorized to decline this request');
+      throw new Error('You are not authorized to decline this friend request');
     }
 
     if (friendship.status !== 'pending') {
-      throw new Error('Request already processed');
+      throw new Error('This friend request has already been processed');
     }
 
+    // Delete the friendship request instead of marking as declined
     await Friendship.findByIdAndDelete(requestId);
   }
 
@@ -191,18 +229,26 @@ export class UserService {
     userId: string,
     friendId: string
   ): Promise<void> {
-    await Friendship.findOneAndDelete({
+    const result = await Friendship.findOneAndDelete({
       $or: [
         { requester: userId, recipient: friendId, status: 'accepted' },
         { requester: friendId, recipient: userId, status: 'accepted' }
       ]
     });
+
+    if (!result) {
+      throw new Error('Friendship not found or you are not friends with this user');
+    }
   }
 
   static async blockUser(
     blockerId: string,
     blockedId: string
   ): Promise<void> {
+    if (blockerId === blockedId) {
+      throw new Error('Cannot block yourself');
+    }
+
     // Remove existing friendship if any
     await Friendship.findOneAndDelete({
       $or: [
@@ -212,13 +258,21 @@ export class UserService {
     });
 
     // Create block relationship
-    const blockFriendship = new Friendship({
-      requester: blockerId,
-      recipient: blockedId,
-      status: 'blocked'
-    });
+    try {
+      const blockFriendship = new Friendship({
+        requester: blockerId,
+        recipient: blockedId,
+        status: 'blocked'
+      });
 
-    await blockFriendship.save();
+      await blockFriendship.save();
+    } catch (error: any) {
+      if (error.code === 11000) {
+        // User is already blocked
+        throw new Error('User is already blocked');
+      }
+      throw error;
+    }
   }
 
   static async updateOnlineStatus(
@@ -251,11 +305,21 @@ export class UserService {
       return null;
     }
 
+    // Return more detailed status information
+    if (friendship.status === 'pending') {
+      // Indicate who sent the request
+      if (friendship.requester.toString() === userId) {
+        return 'pending_sent';
+      } else {
+        return 'pending_received';
+      }
+    }
+
     return friendship.status;
   }
 
   static async getUserStats(userId: string) {
-    const [friendsCount, unreadMessagesCount] = await Promise.all([
+    const [friendsCount, unreadMessagesCount, sentRequestsCount, receivedRequestsCount] = await Promise.all([
       Friendship.countDocuments({
         $or: [
           { requester: userId, status: 'accepted' },
@@ -265,12 +329,22 @@ export class UserService {
       Message.countDocuments({
         recipient: userId,
         isRead: false
+      }),
+      Friendship.countDocuments({
+        requester: userId,
+        status: 'pending'
+      }),
+      Friendship.countDocuments({
+        recipient: userId,
+        status: 'pending'
       })
     ]);
 
     return {
       friendsCount,
       unreadMessagesCount,
+      sentRequestsCount,
+      receivedRequestsCount,
     };
   }
 
