@@ -80,9 +80,12 @@ export class NotificationService {
     }
   }
 
-  static showMessageNotification(senderName: string, message: string, isFile: boolean = false) {
+  static showMessageNotification(senderName: string, message: string, isFile = false) {
     const title = `New message from ${senderName} - SwiftTalk`;
-    const body = isFile ? 'Sent you a file' : message.length > 100 ? message.substring(0, 97) + '...' : message;
+    const messagePreview = isFile ? 'Sent you a file' : message;
+    const body = messagePreview.length > 100 
+      ? `${messagePreview.substring(0, 97)}...`
+      : messagePreview;
     
     this.showNotification(title, {
       body,
