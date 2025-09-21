@@ -88,23 +88,29 @@ export default function MessageInput({ onSendMessage, disabled = false }: Messag
       const formData = new FormData();
       formData.append('file', file);
       
-      const response = await api.post('/chat/upload', formData, {
+      // FIXED: Upload file first to get URL
+      const uploadResponse = await api.post('/chat/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
       });
 
-      if (response.data.success) {
-        const fileData = response.data.data;
+      if (uploadResponse.data.success) {
+        const fileData = uploadResponse.data.data;
         
-        // Send file message with proper data structure
-        onSendMessage(`📎 ${file.name}`, 'file', {
+        console.log('File uploaded successfully:', fileData);
+        
+        // FIXED: Send file message with correct data structure
+        const fileInfo: FileData = {
           fileUrl: fileData.url,
           fileName: file.name,
           fileSize: file.size,
-        });
+        };
         
-        toast.success('File uploaded successfully!');
+        // Send the file message
+        onSendMessage(file.name, 'file', fileInfo);
+        
+        toast.success('File uploaded and sent successfully!');
       } else {
         toast.error('File upload failed');
       }
@@ -119,20 +125,6 @@ export default function MessageInput({ onSendMessage, disabled = false }: Messag
         fileInputRef.current.value = '';
       }
     }
-  };
-
-  const getButtonClass = (condition: boolean) => {
-    const baseClass = 'p-3 rounded-full transition-all duration-200';
-    return condition 
-      ? `${baseClass} bg-gray-100 text-gray-400 cursor-not-allowed`
-      : `${baseClass} bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-800 active:scale-95`;
-  };
-
-  const getSendButtonClass = (condition: boolean) => {
-    const baseClass = 'p-3 rounded-full transition-all duration-200';
-    return condition
-      ? `${baseClass} bg-gray-100 text-gray-400 cursor-not-allowed`
-      : `${baseClass} bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700 active:scale-95 shadow-lg`;
   };
 
   return (
@@ -178,7 +170,11 @@ export default function MessageInput({ onSendMessage, disabled = false }: Messag
             type="button"
             onClick={() => !disabled && !isUploading && fileInputRef.current?.click()}
             disabled={isUploading || disabled}
-            className={getButtonClass(isUploading || disabled)}
+            className={`p-3 rounded-full transition-all duration-200 ${
+              isUploading || disabled
+                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-800 active:scale-95'
+            }`}
             title={disabled ? "Connecting..." : isUploading ? "Uploading..." : "Attach file"}
           >
             {isUploading ? (
@@ -194,7 +190,11 @@ export default function MessageInput({ onSendMessage, disabled = false }: Messag
           <button
             type="submit"
             disabled={!message.trim() || disabled || isUploading}
-            className={getSendButtonClass(!message.trim() || disabled || isUploading)}
+            className={`p-3 rounded-full transition-all duration-200 ${
+              !message.trim() || disabled || isUploading
+                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                : 'bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700 active:scale-95 shadow-lg'
+            }`}
             title={disabled ? "Connecting..." : !message.trim() ? "Type a message" : "Send message"}
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
