@@ -24,17 +24,19 @@ export default function Chat() {
   const [socketConnected, setSocketConnected] = useState(false);
   const navigate = useNavigate();
   
-  // Use separate refs to prevent infinite loops
-  const isInitializedRef = useRef(false);
-  const socketSetupRef = useRef(false);
+  // Use single initialization flag
+  const initRef = useRef(false);
   const loadingFriendsRef = useRef(false);
+  const currentUserRef = useRef<User | null>(null);
+
+  // Update currentUserRef when user changes
+  useEffect(() => {
+    currentUserRef.current = user;
+  }, [user]);
 
   // Load friends from API with debouncing
   const loadFriends = useCallback(async () => {
-    if (loadingFriendsRef.current) {
-      console.log('Already loading friends, skipping...');
-      return;
-    }
+    if (loadingFriendsRef.current) return;
 
     loadingFriendsRef.current = true;
     try {
@@ -44,8 +46,7 @@ export default function Chat() {
       }
     } catch (error) {
       console.error("Failed to load friends:", error);
-      // Only show error toast if it's not a rate limit error
-      if (error.response?.status !== 429) {
+      if (error?.response?.status !== 429) {
         toast.error("Failed to load friends");
       }
     } finally {
@@ -58,11 +59,20 @@ export default function Chat() {
     try {
       const response = await api.get(`/chat/history/${friendId}`);
       if (response.data.success) {
-        const uniqueMessages = response.data.data.data?.filter((msg: Message, index: number, arr: Message[]) => 
-          arr.findIndex(m => m._id === msg._id) === index
-        ) || [];
+        // Remove duplicates and sort by creation time
+        const uniqueMessages = response.data.data.data?.reduce((acc: Message[], msg: Message) => {
+          if (!acc.find(m => m._id === msg._id)) {
+            acc.push(msg);
+          }
+          return acc;
+        }, []) || [];
         
-        setMessages(uniqueMessages);
+        // Sort messages by creation time (oldest first)
+        const sortedMessages = uniqueMessages.sort((a, b) => 
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
+        
+        setMessages(sortedMessages);
         
         // Mark messages as read
         try {
@@ -77,32 +87,38 @@ export default function Chat() {
     }
   }, []);
 
-  // Stable message handler - don't recreate unnecessarily
+  // Stable message handler using refs to avoid recreating
   const handleNewMessage = useCallback((message: Message) => {
-    console.log('New message received:', message);
+    console.log('New message received via socket:', message);
     
-    // Only add message if it's for the current chat
-    if (selectedFriend && 
-        (message.sender._id === selectedFriend._id || message.recipient === selectedFriend._id)) {
+    const currentUser = currentUserRef.current;
+    if (!currentUser) return;
+
+    // Add message to current chat if it's relevant
+    setMessages(prevMessages => {
+      // Check if message already exists
+      const messageExists = prevMessages.some(msg => msg._id === message._id);
+      if (messageExists) {
+        console.log('Message already exists, skipping...');
+        return prevMessages;
+      }
       
-      setMessages(prevMessages => {
-        const messageExists = prevMessages.some(msg => msg._id === message._id);
-        if (messageExists) {
-          return prevMessages;
-        }
-        return [...prevMessages, message];
-      });
-    }
+      // Add message and sort
+      const newMessages = [...prevMessages, message];
+      return newMessages.sort((a, b) => 
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      );
+    });
     
-    // Update friends list but with debouncing
+    // Update friends list with delay to avoid rapid API calls
     setTimeout(() => {
       if (!loadingFriendsRef.current) {
         loadFriends();
       }
-    }, 500);
+    }, 1000);
     
     // Show notifications for messages from others
-    if (message.sender._id !== user?._id) {
+    if (message.sender._id !== currentUser._id) {
       const isFile = message.messageType === 'file';
       NotificationService.showMessageNotification(
         message.sender.username,
@@ -110,15 +126,12 @@ export default function Chat() {
         isFile
       );
       
-      // Show toast only if not in current chat
-      if (!selectedFriend || selectedFriend._id !== message.sender._id) {
-        toast.success(`New message from ${message.sender.username}`, {
-          icon: '💬',
-          duration: 4000,
-        });
-      }
+      toast.success(`💬 New message from ${message.sender.username}`, {
+        icon: '🔔',
+        duration: 3000,
+      });
     }
-  }, [selectedFriend, user?._id, loadFriends]);
+  }, [loadFriends]);
 
   // Stable friend status handler
   const handleFriendStatusUpdate = useCallback(
@@ -129,9 +142,9 @@ export default function Chat() {
         )
       );
       
-      if (selectedFriend && selectedFriend._id === userId) {
-        setSelectedFriend(prev => prev ? { ...prev, isOnline } : null);
-      }
+      setSelectedFriend(prev => 
+        prev && prev._id === userId ? { ...prev, isOnline } : prev
+      );
 
       if (isOnline) {
         const friend = friends.find(f => f._id === userId);
@@ -140,71 +153,15 @@ export default function Chat() {
         }
       }
     },
-    [selectedFriend, friends]
+    [friends]
   );
 
-  // Stable socket event handlers
-  const handleSocketConnection = useCallback(() => {
-    console.log('Socket connected successfully');
-    setSocketConnected(true);
-    socketService.resetReconnectionAttempts();
-  }, []);
-
-  const handleSocketDisconnection = useCallback(() => {
-    console.log('Socket disconnected');
-    setSocketConnected(false);
-  }, []);
-
-  const handleSocketError = useCallback((error: any) => {
-    console.error('Socket connection error:', error);
-    setSocketConnected(false);
-  }, []);
-
-  // Initialize socket connection ONCE
+  // Initialize everything once
   useEffect(() => {
-    if (socketSetupRef.current || !user) return;
+    if (initRef.current) return;
+    initRef.current = true;
 
-    const setupSocket = async () => {
-      socketSetupRef.current = true;
-      
-      try {
-        await socketService.connect();
-        
-        // Set up event listeners
-        socketService.on("connect", handleSocketConnection);
-        socketService.on("disconnect", handleSocketDisconnection);
-        socketService.on("connect_error", handleSocketError);
-        socketService.on("new_message", handleNewMessage);
-        socketService.on("friend_status_update", handleFriendStatusUpdate);
-        
-        setSocketConnected(socketService.isConnected());
-        console.log('Socket setup complete');
-      } catch (error) {
-        console.error("Failed to setup socket:", error);
-        socketSetupRef.current = false;
-      }
-    };
-
-    setupSocket();
-
-    return () => {
-      if (socketSetupRef.current) {
-        socketService.off("connect", handleSocketConnection);
-        socketService.off("disconnect", handleSocketDisconnection);
-        socketService.off("connect_error", handleSocketError);
-        socketService.off("new_message", handleNewMessage);
-        socketService.off("friend_status_update", handleFriendStatusUpdate);
-        socketService.disconnect();
-        socketSetupRef.current = false;
-      }
-    };
-  }, [user, handleSocketConnection, handleSocketDisconnection, handleSocketError, handleNewMessage, handleFriendStatusUpdate]);
-
-  // Initialize app ONCE
-  useEffect(() => {
-    if (isInitializedRef.current) return;
-
-    const initializeChat = async () => {
+    const initializeApp = async () => {
       const currentUser = getUser();
       
       if (!currentUser) {
@@ -221,27 +178,50 @@ export default function Chat() {
         // Load initial data
         await loadFriends();
         
-        isInitializedRef.current = true;
+        // Set up socket connection
+        await socketService.connect();
+        
+        // Set up socket event listeners
+        socketService.on("connect", () => {
+          console.log('Socket connected');
+          setSocketConnected(true);
+        });
+        
+        socketService.on("disconnect", () => {
+          console.log('Socket disconnected');
+          setSocketConnected(false);
+        });
+        
+        socketService.on("connect_error", (error) => {
+          console.error('Socket connection error:', error);
+          setSocketConnected(false);
+        });
+        
+        socketService.on("new_message", handleNewMessage);
+        socketService.on("friend_status_update", handleFriendStatusUpdate);
+        
+        setSocketConnected(socketService.isConnected());
+        
       } catch (error) {
-        console.error("Failed to initialize chat:", error);
+        console.error("Failed to initialize SwiftTalk:", error);
         toast.error("Failed to initialize SwiftTalk. Please refresh the page.");
       } finally {
         setLoading(false);
       }
     };
 
-    initializeChat();
-  }, [navigate, loadFriends]);
+    initializeApp();
 
-  // Monitor socket connection status less frequently
-  useEffect(() => {
-    const checkSocketStatus = () => {
-      setSocketConnected(socketService.isConnected());
+    // Cleanup function
+    return () => {
+      socketService.off("connect");
+      socketService.off("disconnect");
+      socketService.off("connect_error");
+      socketService.off("new_message", handleNewMessage);
+      socketService.off("friend_status_update", handleFriendStatusUpdate);
+      socketService.disconnect();
     };
-
-    const interval = setInterval(checkSocketStatus, 10000); // Check every 10 seconds instead of 5
-    return () => clearInterval(interval);
-  }, []);
+  }, [navigate, loadFriends, handleNewMessage, handleFriendStatusUpdate]);
 
   const handleFriendSelect = (friend: Friend) => {
     setSelectedFriend(friend);
@@ -270,14 +250,19 @@ export default function Chat() {
       if (response.data.success) {
         const newMessage = response.data.data;
         
+        // Add message locally immediately (optimistic update)
         setMessages(prevMessages => {
           const messageExists = prevMessages.some(msg => msg._id === newMessage._id);
           if (!messageExists) {
-            return [...prevMessages, newMessage];
+            const updatedMessages = [...prevMessages, newMessage];
+            return updatedMessages.sort((a, b) => 
+              new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+            );
           }
           return prevMessages;
         });
         
+        // Emit via socket for real-time delivery to other users
         if (socketConnected) {
           const socketData: any = {
             recipientId: selectedFriend._id,
@@ -292,12 +277,12 @@ export default function Chat() {
           socketService.emit("send_message", socketData);
         }
 
-        // Update friends list with delay
+        // Update friends list after a delay
         setTimeout(() => {
           if (!loadingFriendsRef.current) {
             loadFriends();
           }
-        }, 200);
+        }, 500);
       }
     } catch (error) {
       console.error("Failed to send message:", error);
@@ -397,7 +382,7 @@ export default function Chat() {
               <div>
                 <h2 className="font-semibold text-gray-900 text-sm md:text-base">{user.username}</h2>
                 <div className="flex items-center space-x-2">
-                  <div className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                  <div className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
                   <p className="text-xs text-gray-500">
                     {socketConnected ? 'Connected' : 'Connecting...'}
                   </p>
@@ -415,7 +400,6 @@ export default function Chat() {
             </button>
           </div>
 
-          {/* SwiftTalk Branding */}
           <div className="text-center">
             <h1 className="text-lg font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
               SwiftTalk
@@ -449,7 +433,7 @@ export default function Chat() {
         {!socketConnected && (
           <div className="p-2 bg-yellow-50 border-b border-yellow-200">
             <p className="text-xs text-yellow-800 text-center">
-              Connection issues detected. Messages may not be delivered in real-time.
+              ⚠️ Real-time messaging temporarily unavailable
             </p>
           </div>
         )}
@@ -496,7 +480,7 @@ export default function Chat() {
                     {selectedFriend.username}
                   </h3>
                   <div className="flex items-center space-x-1">
-                    <div className={`w-2 h-2 rounded-full ${selectedFriend.isOnline ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+                    <div className={`w-2 h-2 rounded-full ${selectedFriend.isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></div>
                     <p className="text-sm text-gray-500">
                       {selectedFriend.isOnline ? "Online" : "Offline"}
                     </p>
