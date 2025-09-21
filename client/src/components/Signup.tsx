@@ -5,6 +5,14 @@ import api from '../lib/api';
 import { setToken, setUser } from '../lib/auth';
 import type { SignupData, AuthResponse } from '../types';
 
+interface ApiError {
+  response?: {
+    data?: {
+      message?: string;
+    };
+  };
+}
+
 export default function Signup() {
   const [formData, setFormData] = useState<SignupData>({
     username: '',
@@ -39,8 +47,9 @@ export default function Signup() {
       } else {
         toast.error(response.data.message || 'Signup failed');
       }
-    } catch (error: any) {
-      const message = error.response?.data?.message || 'Signup failed';
+    } catch (error) {
+      const apiError = error as ApiError;
+      const message = apiError.response?.data?.message || 'Signup failed';
       toast.error(message);
     } finally {
       setLoading(false);
