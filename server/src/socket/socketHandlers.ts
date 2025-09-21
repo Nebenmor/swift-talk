@@ -29,16 +29,6 @@ class SocketManager {
         }
       });
 
-      // Handle user joining chat rooms
-      socket.on('join_chat', (data: { userId: string }) => {
-        this.handleJoinChat(socket, data);
-      });
-
-      // Handle leaving chat rooms
-      socket.on('leave_chat', (data: { userId: string }) => {
-        this.handleLeaveChat(socket, data);
-      });
-
       // Handle sending messages
       socket.on('send_message', async (data: any) => {
         try {
@@ -131,26 +121,6 @@ class SocketManager {
     console.log(`User authenticated: ${user.username} (${socket.id})`);
   }
 
-  private handleJoinChat(socket: Socket, data: { userId: string }): void {
-    const user = this.connectedUsers.get(socket.id);
-    if (!user) return;
-
-    const chatRoom = this.getChatRoomId(user.userId, data.userId);
-    socket.join(chatRoom);
-    
-    console.log(`User ${user.username} joined chat with ${data.userId}`);
-  }
-
-  private handleLeaveChat(socket: Socket, data: { userId: string }): void {
-    const user = this.connectedUsers.get(socket.id);
-    if (!user) return;
-
-    const chatRoom = this.getChatRoomId(user.userId, data.userId);
-    socket.leave(chatRoom);
-    
-    console.log(`User ${user.username} left chat with ${data.userId}`);
-  }
-
   private async handleSendMessage(socket: Socket, data: {
     recipientId: string;
     content: string;
@@ -166,37 +136,37 @@ class SocketManager {
       throw new Error('User not authenticated');
     }
 
-    // Send message via service
-    const message = await ChatService.sendMessage(
-      user.userId,
-      data.recipientId,
-      data.content,
-      data.messageType || 'text',
-      data.fileData
-    );
+    try {
+      // Send message via service (this will save to database)
+      const message = await ChatService.sendMessage(
+        user.userId,
+        data.recipientId,
+        data.content,
+        data.messageType || 'text',
+        data.fileData
+      );
 
-    // Get chat room
-    const chatRoom = this.getChatRoomId(user.userId, data.recipientId);
+      console.log(`Message sent from ${user.username} to ${data.recipientId}:`, message.content);
 
-    // Emit message to chat room
-    this.io.to(chatRoom).emit('new_message', message);
-
-    // Notify recipient if they're online but not in the chat room
-    const recipientSocketId = this.userSockets.get(data.recipientId);
-    if (recipientSocketId) {
-      const recipientSocket = this.io.sockets.sockets.get(recipientSocketId);
-      if (recipientSocket && !recipientSocket.rooms.has(chatRoom)) {
-        recipientSocket.emit('message_notification', {
-          from: {
-            _id: user.userId,
-            username: user.username,
-          },
-          message: {
-            content: data.messageType === 'file' ? 'Sent a file' : data.content,
-            createdAt: message.createdAt,
-          },
-        });
+      // Broadcast the message to both sender and recipient
+      const recipientSocketId = this.userSockets.get(data.recipientId);
+      
+      // Send to recipient if they're online
+      if (recipientSocketId) {
+        console.log(`Broadcasting message to recipient socket: ${recipientSocketId}`);
+        this.io.to(recipientSocketId).emit('new_message', message);
+      } else {
+        console.log(`Recipient ${data.recipientId} is not online`);
       }
+
+      // Also send back to sender for confirmation (optional)
+      socket.emit('message_sent', { success: true, message });
+
+    } catch (error) {
+      console.error('Error sending message:', error);
+      socket.emit('message_error', { 
+        message: error instanceof Error ? error.message : 'Failed to send message' 
+      });
     }
   }
 
@@ -301,12 +271,6 @@ class SocketManager {
     }
   }
 
-  private getChatRoomId(userId1: string, userId2: string): string {
-    // Create consistent room ID regardless of user order
-    const sortedIds = [userId1, userId2].sort((a, b) => a.localeCompare(b));
-    return `chat_${sortedIds[0]}_${sortedIds[1]}`;
-  }
-
   // Public methods for external use
   public getConnectedUsers(): SocketUser[] {
     return Array.from(this.connectedUsers.values());
@@ -329,25 +293,20 @@ class SocketManager {
     return false;
   }
 
-  public emitToRoom(roomId: string, event: string, data: any): void {
-    this.io.to(roomId).emit(event, data);
-  }
+  public broadcastMessage(message: any): void {
+    // Broadcast message to both sender and recipient
+    const senderSocketId = this.userSockets.get(message.sender._id);
+    const recipientSocketId = this.userSockets.get(message.recipient);
 
-  public broadcastToAllUsers(event: string, data: any): void {
-    this.io.emit(event, data);
-  }
-
-  // Method to forcibly disconnect a user (for admin purposes)
-  public disconnectUser(userId: string): boolean {
-    const socketId = this.userSockets.get(userId);
-    if (socketId) {
-      const socket = this.io.sockets.sockets.get(socketId);
-      if (socket) {
-        socket.disconnect();
-        return true;
-      }
+    if (recipientSocketId) {
+      console.log(`Broadcasting message to recipient: ${message.recipient}`);
+      this.io.to(recipientSocketId).emit('new_message', message);
     }
-    return false;
+
+    // Optional: Also send to sender for confirmation
+    if (senderSocketId) {
+      this.io.to(senderSocketId).emit('message_sent', { success: true, message });
+    }
   }
 
   // Get statistics about connected users
@@ -362,6 +321,19 @@ class SocketManager {
       uniqueUsers: this.userSockets.size,
       usersList: connectedUsers.map(user => user.username),
     };
+  }
+
+  // Method to forcibly disconnect a user (for admin purposes)
+  public disconnectUser(userId: string): boolean {
+    const socketId = this.userSockets.get(userId);
+    if (socketId) {
+      const socket = this.io.sockets.sockets.get(socketId);
+      if (socket) {
+        socket.disconnect();
+        return true;
+      }
+    }
+    return false;
   }
 }
 
