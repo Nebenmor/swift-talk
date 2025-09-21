@@ -2,9 +2,25 @@ import { useState, useRef } from 'react';
 import toast from 'react-hot-toast';
 import api from '../lib/api';
 
+interface FileData {
+  fileUrl: string;
+  fileName: string;
+  fileSize: number;
+}
+
 interface MessageInputProps {
-  readonly onSendMessage: (content: string, messageType?: 'text' | 'file', fileData?: any) => void;
+  readonly onSendMessage: (content: string, messageType?: 'text' | 'file', fileData?: FileData) => void;
   readonly disabled?: boolean;
+}
+
+interface ApiError {
+  response?: {
+    status?: number;
+    data?: {
+      message?: string;
+    };
+  };
+  message?: string;
 }
 
 export default function MessageInput({ onSendMessage, disabled = false }: MessageInputProps) {
@@ -28,7 +44,7 @@ export default function MessageInput({ onSendMessage, disabled = false }: Messag
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey && !disabled && !isUploading) {
       e.preventDefault();
-      handleSubmit(e as any);
+      handleSubmit(e as React.FormEvent);
     }
   };
 
@@ -92,9 +108,10 @@ export default function MessageInput({ onSendMessage, disabled = false }: Messag
       } else {
         toast.error('File upload failed');
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('File upload failed:', error);
-      const errorMessage = error.response?.data?.message || 'File upload failed';
+      const apiError = error as ApiError;
+      const errorMessage = apiError.response?.data?.message || 'File upload failed';
       toast.error(errorMessage);
     } finally {
       setIsUploading(false);
@@ -102,6 +119,20 @@ export default function MessageInput({ onSendMessage, disabled = false }: Messag
         fileInputRef.current.value = '';
       }
     }
+  };
+
+  const getButtonClass = (condition: boolean) => {
+    const baseClass = 'p-3 rounded-full transition-all duration-200';
+    return condition 
+      ? `${baseClass} bg-gray-100 text-gray-400 cursor-not-allowed`
+      : `${baseClass} bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-800 active:scale-95`;
+  };
+
+  const getSendButtonClass = (condition: boolean) => {
+    const baseClass = 'p-3 rounded-full transition-all duration-200';
+    return condition
+      ? `${baseClass} bg-gray-100 text-gray-400 cursor-not-allowed`
+      : `${baseClass} bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700 active:scale-95 shadow-lg`;
   };
 
   return (
@@ -147,11 +178,7 @@ export default function MessageInput({ onSendMessage, disabled = false }: Messag
             type="button"
             onClick={() => !disabled && !isUploading && fileInputRef.current?.click()}
             disabled={isUploading || disabled}
-            className={`p-3 rounded-full transition-all duration-200 ${
-              (isUploading || disabled) 
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-800 active:scale-95'
-            }`}
+            className={getButtonClass(isUploading || disabled)}
             title={disabled ? "Connecting..." : isUploading ? "Uploading..." : "Attach file"}
           >
             {isUploading ? (
@@ -167,11 +194,7 @@ export default function MessageInput({ onSendMessage, disabled = false }: Messag
           <button
             type="submit"
             disabled={!message.trim() || disabled || isUploading}
-            className={`p-3 rounded-full transition-all duration-200 ${
-              (!message.trim() || disabled || isUploading)
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700 active:scale-95 shadow-lg'
-            }`}
+            className={getSendButtonClass(!message.trim() || disabled || isUploading)}
             title={disabled ? "Connecting..." : !message.trim() ? "Type a message" : "Send message"}
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
