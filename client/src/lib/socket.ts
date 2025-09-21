@@ -6,10 +6,10 @@ const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
 class SocketService {
   private static instance: SocketService | null = null;
   private socket: Socket | null = null;
-  private isConnected = false;
+  private connected = false;
   private isAuthenticated = false;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 3;
+  private readonly maxReconnectAttempts = 3;
 
   public static getInstance(): SocketService {
     if (!SocketService.instance) {
@@ -22,7 +22,7 @@ class SocketService {
 
   async connect(): Promise<void> {
     // If already connected and authenticated, return
-    if (this.socket && this.isConnected && this.isAuthenticated) {
+    if (this.socket && this.connected && this.isAuthenticated) {
       console.log('Socket already connected and authenticated');
       return;
     }
@@ -51,13 +51,13 @@ class SocketService {
       // Set up one-time connection handlers
       const onConnect = () => {
         console.log('Socket connected, authenticating...');
-        this.isConnected = true;
+        this.connected = true;
         if (this.socket) {
           this.socket.emit('authenticate', token);
         }
       };
 
-      const onAuthenticated = (data: any) => {
+      const onAuthenticated = (data: { user?: { username: string } }) => {
         console.log('Socket authenticated successfully:', data.user?.username);
         this.isAuthenticated = true;
         this.reconnectAttempts = 0;
@@ -67,13 +67,13 @@ class SocketService {
         resolve();
       };
 
-      const onAuthError = (error: any) => {
+      const onAuthError = (error: { message: string }) => {
         console.error('Socket authentication error:', error);
         cleanup();
         reject(new Error('Authentication failed'));
       };
 
-      const onConnectError = (error: any) => {
+      const onConnectError = (error: Error) => {
         console.error('Socket connection error:', error);
         cleanup();
         reject(error);
@@ -97,7 +97,7 @@ class SocketService {
       // Set up persistent disconnect handler
       this.socket.on('disconnect', (reason) => {
         console.log('Socket disconnected:', reason);
-        this.isConnected = false;
+        this.connected = false;
         this.isAuthenticated = false;
         
         // Only attempt reconnection for certain disconnect reasons
@@ -129,7 +129,7 @@ class SocketService {
   disconnect() {
     console.log('Manually disconnecting socket');
     
-    this.isConnected = false;
+    this.connected = false;
     this.isAuthenticated = false;
     this.reconnectAttempts = 0;
     
@@ -140,16 +140,16 @@ class SocketService {
     }
   }
 
-  emit(event: string, data: any) {
-    if (this.socket && this.isConnected && this.isAuthenticated) {
+  emit(event: string, data: unknown) {
+    if (this.socket && this.connected && this.isAuthenticated) {
       console.log(`Emitting ${event}:`, data);
       this.socket.emit(event, data);
     } else {
-      console.warn(`Cannot emit ${event}: Socket not ready (connected: ${this.isConnected}, authenticated: ${this.isAuthenticated})`);
+      console.warn(`Cannot emit ${event}: Socket not ready (connected: ${this.connected}, authenticated: ${this.isAuthenticated})`);
     }
   }
 
-  on(event: string, callback: (data: any) => void) {
+  on(event: string, callback: (data: unknown) => void) {
     if (this.socket) {
       this.socket.on(event, callback);
     } else {
@@ -157,7 +157,7 @@ class SocketService {
     }
   }
 
-  off(event: string, callback?: (...args: any[]) => void) {
+  off(event: string, callback?: (...args: unknown[]) => void) {
     if (this.socket) {
       if (callback) {
         this.socket.off(event, callback);
@@ -168,7 +168,7 @@ class SocketService {
   }
 
   isConnected(): boolean {
-    return this.isConnected && this.isAuthenticated;
+    return this.connected && this.isAuthenticated;
   }
 
   resetReconnectionAttempts() {
@@ -177,7 +177,7 @@ class SocketService {
 
   getConnectionStatus() {
     return {
-      connected: this.isConnected,
+      connected: this.connected,
       authenticated: this.isAuthenticated,
       reconnectAttempts: this.reconnectAttempts,
     };
