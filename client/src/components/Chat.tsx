@@ -34,15 +34,20 @@ export default function Chat() {
   const [socketConnected, setSocketConnected] = useState(false);
   const navigate = useNavigate();
   
-  // Use single initialization flag
+  // Use refs to prevent stale closures
   const initRef = useRef(false);
   const loadingFriendsRef = useRef(false);
   const currentUserRef = useRef<User | null>(null);
+  const selectedFriendRef = useRef<Friend | null>(null);
 
-  // Update currentUserRef when user changes
+  // Update refs when state changes
   useEffect(() => {
     currentUserRef.current = user;
   }, [user]);
+
+  useEffect(() => {
+    selectedFriendRef.current = selectedFriend;
+  }, [selectedFriend]);
 
   // Load friends from API with debouncing
   const loadFriends = useCallback(async () => {
@@ -52,7 +57,8 @@ export default function Chat() {
     try {
       const response = await api.get('/users/friends/with-messages');
       if (response.data.success) {
-        setFriends(response.data.data || []);
+        const newFriends = response.data.data || [];
+        setFriends(newFriends);
       }
     } catch (error) {
       console.error("Failed to load friends:", error);
@@ -98,11 +104,14 @@ export default function Chat() {
     }
   }, []);
 
-  // Stable message handler using refs to avoid recreating
-  const handleNewMessage = useCallback((message: Message) => {
+  // FIXED: Message handler with proper typing
+  const handleNewMessage = useCallback((data: unknown) => {
+    const message = data as Message;
     console.log('New message received via socket:', message);
     
     const currentUser = currentUserRef.current;
+    const currentSelectedFriend = selectedFriendRef.current;
+    
     if (!currentUser) return;
 
     // Add message to current chat if it's relevant
@@ -114,14 +123,23 @@ export default function Chat() {
         return prevMessages;
       }
       
-      // Add message and sort
-      const newMessages = [...prevMessages, message];
-      return newMessages.sort((a: Message, b: Message) => 
-        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      // Only add message if it's part of the current conversation
+      const isRelevantToCurrentChat = currentSelectedFriend && (
+        (message.sender._id === currentUser._id && message.recipient === currentSelectedFriend._id) ||
+        (message.sender._id === currentSelectedFriend._id && message.recipient === currentUser._id)
       );
+      
+      if (isRelevantToCurrentChat) {
+        const newMessages = [...prevMessages, message];
+        return newMessages.sort((a: Message, b: Message) => 
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
+      }
+      
+      return prevMessages;
     });
     
-    // Update friends list with delay to avoid rapid API calls
+    // Update friends list after delay
     setTimeout(() => {
       if (!loadingFriendsRef.current) {
         loadFriends();
@@ -144,28 +162,28 @@ export default function Chat() {
     }
   }, [loadFriends]);
 
-  // Stable friend status handler
-  const handleFriendStatusUpdate = useCallback(
-    ({ userId, isOnline }: { userId: string; isOnline: boolean }) => {
-      setFriends((prev) =>
-        prev.map((friend) =>
-          friend._id === userId ? { ...friend, isOnline } : friend
-        )
-      );
-      
-      setSelectedFriend(prev => 
-        prev && prev._id === userId ? { ...prev, isOnline } : prev
-      );
+  // FIXED: Friend status handler with proper typing
+  const handleFriendStatusUpdate = useCallback((data: unknown) => {
+    const statusData = data as { userId: string; isOnline: boolean };
+    const { userId, isOnline } = statusData;
+    
+    setFriends((prev) =>
+      prev.map((friend) =>
+        friend._id === userId ? { ...friend, isOnline } : friend
+      )
+    );
+    
+    setSelectedFriend(prev => 
+      prev && prev._id === userId ? { ...prev, isOnline } : prev
+    );
 
-      if (isOnline) {
-        const friend = friends.find(f => f._id === userId);
-        if (friend) {
-          NotificationService.showFriendOnlineNotification(friend.username);
-        }
+    if (isOnline) {
+      const friend = friends.find(f => f._id === userId);
+      if (friend) {
+        NotificationService.showFriendOnlineNotification(friend.username);
       }
-    },
-    [friends]
-  );
+    }
+  }, [friends]);
 
   // Initialize everything once
   useEffect(() => {
@@ -192,7 +210,7 @@ export default function Chat() {
         // Set up socket connection
         await socketService.connect();
         
-        // Set up socket event listeners
+        // Set up socket event listeners with proper typing
         socketService.on("connect", () => {
           console.log('Socket connected');
           setSocketConnected(true);
@@ -208,6 +226,7 @@ export default function Chat() {
           setSocketConnected(false);
         });
         
+        // FIXED: Use the properly typed handlers
         socketService.on("new_message", handleNewMessage);
         socketService.on("friend_status_update", handleFriendStatusUpdate);
         
@@ -228,8 +247,8 @@ export default function Chat() {
       socketService.off("connect");
       socketService.off("disconnect");
       socketService.off("connect_error");
-      socketService.off("new_message", handleNewMessage);
-      socketService.off("friend_status_update", handleFriendStatusUpdate);
+      socketService.off("new_message");
+      socketService.off("friend_status_update");
       socketService.disconnect();
     };
   }, [navigate, loadFriends, handleNewMessage, handleFriendStatusUpdate]);
@@ -244,12 +263,14 @@ export default function Chat() {
     if (!selectedFriend || !user) return;
 
     try {
+      // FIXED: Properly structure the request data to match backend expectations
       const requestData: Record<string, unknown> = {
         recipient: selectedFriend._id,
         content,
         messageType,
       };
 
+      // FIXED: Add file data properly for file messages
       if (messageType === 'file' && fileData && typeof fileData === 'object' && fileData !== null) {
         const fileInfo = fileData as { fileUrl: string; fileName: string; fileSize: number };
         requestData.fileUrl = fileInfo.fileUrl;
@@ -262,7 +283,7 @@ export default function Chat() {
       if (response.data.success) {
         const newMessage = response.data.data;
         
-        // Add message locally immediately (optimistic update)
+        // FIXED: Only add message if it doesn't already exist (prevent duplicates)
         setMessages(prevMessages => {
           const messageExists = prevMessages.some(msg => msg._id === newMessage._id);
           if (!messageExists) {
@@ -274,21 +295,9 @@ export default function Chat() {
           return prevMessages;
         });
         
-        // Emit via socket for real-time delivery to other users
-        if (socketConnected) {
-          const socketData: Record<string, unknown> = {
-            recipientId: selectedFriend._id,
-            content,
-            messageType,
-          };
-
-          if (messageType === 'file' && fileData) {
-            socketData.fileData = fileData;
-          }
-
-          socketService.emit("send_message", socketData);
-        }
-
+        // FIXED: Don't emit via socket - the backend will handle broadcasting
+        // The socket emission was causing duplicate messages
+        
         // Update friends list after a delay
         setTimeout(() => {
           if (!loadingFriendsRef.current) {
@@ -371,13 +380,6 @@ export default function Chat() {
         <div 
           className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
           onClick={() => setSidebarOpen(false)}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              setSidebarOpen(false);
-            }
-          }}
         />
       )}
 
