@@ -23,11 +23,20 @@ export default function Chat() {
   const [loading, setLoading] = useState(true);
   const [socketConnected, setSocketConnected] = useState(false);
   const navigate = useNavigate();
-  const isInitialized = useRef(false);
-  const socketListenersSetup = useRef(false);
+  
+  // Use separate refs to prevent infinite loops
+  const isInitializedRef = useRef(false);
+  const socketSetupRef = useRef(false);
+  const loadingFriendsRef = useRef(false);
 
-  // Load friends from API
+  // Load friends from API with debouncing
   const loadFriends = useCallback(async () => {
+    if (loadingFriendsRef.current) {
+      console.log('Already loading friends, skipping...');
+      return;
+    }
+
+    loadingFriendsRef.current = true;
     try {
       const response = await api.get('/users/friends/with-messages');
       if (response.data.success) {
@@ -35,7 +44,12 @@ export default function Chat() {
       }
     } catch (error) {
       console.error("Failed to load friends:", error);
-      toast.error("Failed to load friends");
+      // Only show error toast if it's not a rate limit error
+      if (error.response?.status !== 429) {
+        toast.error("Failed to load friends");
+      }
+    } finally {
+      loadingFriendsRef.current = false;
     }
   }, []);
 
@@ -44,7 +58,6 @@ export default function Chat() {
     try {
       const response = await api.get(`/chat/history/${friendId}`);
       if (response.data.success) {
-        // Remove duplicates based on message ID
         const uniqueMessages = response.data.data.data?.filter((msg: Message, index: number, arr: Message[]) => 
           arr.findIndex(m => m._id === msg._id) === index
         ) || [];
@@ -64,7 +77,7 @@ export default function Chat() {
     }
   }, []);
 
-  // Handle new message from socket
+  // Stable message handler - don't recreate unnecessarily
   const handleNewMessage = useCallback((message: Message) => {
     console.log('New message received:', message);
     
@@ -73,23 +86,23 @@ export default function Chat() {
         (message.sender._id === selectedFriend._id || message.recipient === selectedFriend._id)) {
       
       setMessages(prevMessages => {
-        // Check if message already exists to prevent duplicates
         const messageExists = prevMessages.some(msg => msg._id === message._id);
         if (messageExists) {
           return prevMessages;
         }
-        
-        // Add new message
         return [...prevMessages, message];
       });
     }
     
-    // Always update friends list to show latest message
-    loadFriends();
+    // Update friends list but with debouncing
+    setTimeout(() => {
+      if (!loadingFriendsRef.current) {
+        loadFriends();
+      }
+    }, 500);
     
     // Show notifications for messages from others
     if (message.sender._id !== user?._id) {
-      // Show desktop notification
       const isFile = message.messageType === 'file';
       NotificationService.showMessageNotification(
         message.sender.username,
@@ -99,15 +112,15 @@ export default function Chat() {
       
       // Show toast only if not in current chat
       if (!selectedFriend || selectedFriend._id !== message.sender._id) {
-        toast.success(`💬 New message from ${message.sender.username}`, {
-          icon: '🔔',
+        toast.success(`New message from ${message.sender.username}`, {
+          icon: '💬',
           duration: 4000,
         });
       }
     }
   }, [selectedFriend, user?._id, loadFriends]);
 
-  // Handle friend status updates
+  // Stable friend status handler
   const handleFriendStatusUpdate = useCallback(
     ({ userId, isOnline }: { userId: string; isOnline: boolean }) => {
       setFriends((prev) =>
@@ -116,12 +129,10 @@ export default function Chat() {
         )
       );
       
-      // Update selected friend status as well
       if (selectedFriend && selectedFriend._id === userId) {
         setSelectedFriend(prev => prev ? { ...prev, isOnline } : null);
       }
 
-      // Show notification for friends coming online (less intrusive)
       if (isOnline) {
         const friend = friends.find(f => f._id === userId);
         if (friend) {
@@ -132,10 +143,11 @@ export default function Chat() {
     [selectedFriend, friends]
   );
 
-  // Handle socket connection
+  // Stable socket event handlers
   const handleSocketConnection = useCallback(() => {
     console.log('Socket connected successfully');
     setSocketConnected(true);
+    socketService.resetReconnectionAttempts();
   }, []);
 
   const handleSocketDisconnection = useCallback(() => {
@@ -148,14 +160,17 @@ export default function Chat() {
     setSocketConnected(false);
   }, []);
 
-  // Setup socket event listeners only once
-  const setupSocketListeners = useCallback(() => {
-    if (socketListenersSetup.current) return;
-    
-    const connectAndSetupListeners = async () => {
+  // Initialize socket connection ONCE
+  useEffect(() => {
+    if (socketSetupRef.current || !user) return;
+
+    const setupSocket = async () => {
+      socketSetupRef.current = true;
+      
       try {
         await socketService.connect();
         
+        // Set up event listeners
         socketService.on("connect", handleSocketConnection);
         socketService.on("disconnect", handleSocketDisconnection);
         socketService.on("connect_error", handleSocketError);
@@ -163,18 +178,31 @@ export default function Chat() {
         socketService.on("friend_status_update", handleFriendStatusUpdate);
         
         setSocketConnected(socketService.isConnected());
-        socketListenersSetup.current = true;
+        console.log('Socket setup complete');
       } catch (error) {
-        console.error("Failed to connect socket and setup listeners:", error);
+        console.error("Failed to setup socket:", error);
+        socketSetupRef.current = false;
       }
     };
-    
-    connectAndSetupListeners();
-  }, [handleSocketConnection, handleSocketDisconnection, handleSocketError, handleNewMessage, handleFriendStatusUpdate]);
 
-  // Initialize user and socket connection
+    setupSocket();
+
+    return () => {
+      if (socketSetupRef.current) {
+        socketService.off("connect", handleSocketConnection);
+        socketService.off("disconnect", handleSocketDisconnection);
+        socketService.off("connect_error", handleSocketError);
+        socketService.off("new_message", handleNewMessage);
+        socketService.off("friend_status_update", handleFriendStatusUpdate);
+        socketService.disconnect();
+        socketSetupRef.current = false;
+      }
+    };
+  }, [user, handleSocketConnection, handleSocketDisconnection, handleSocketError, handleNewMessage, handleFriendStatusUpdate]);
+
+  // Initialize app ONCE
   useEffect(() => {
-    if (isInitialized.current) return;
+    if (isInitializedRef.current) return;
 
     const initializeChat = async () => {
       const currentUser = getUser();
@@ -190,47 +218,34 @@ export default function Chat() {
         // Initialize notifications
         await NotificationService.requestPermission();
         
-        setupSocketListeners();
+        // Load initial data
         await loadFriends();
-        isInitialized.current = true;
+        
+        isInitializedRef.current = true;
       } catch (error) {
         console.error("Failed to initialize chat:", error);
-        toast.error("Failed to initialize chat. Please refresh the page.");
+        toast.error("Failed to initialize SwiftTalk. Please refresh the page.");
       } finally {
         setLoading(false);
       }
     };
 
     initializeChat();
+  }, [navigate, loadFriends]);
 
-    return () => {
-      if (isInitialized.current) {
-        socketService.off("connect", handleSocketConnection);
-        socketService.off("disconnect", handleSocketDisconnection);  
-        socketService.off("connect_error", handleSocketError);
-        socketService.off("new_message", handleNewMessage);
-        socketService.off("friend_status_update", handleFriendStatusUpdate);
-        socketService.disconnect();
-        isInitialized.current = false;
-        socketListenersSetup.current = false;
-      }
-    };
-  }, [navigate, loadFriends, setupSocketListeners, handleSocketConnection, handleSocketDisconnection, handleSocketError, handleNewMessage, handleFriendStatusUpdate]);
-
-  // Monitor socket connection status
+  // Monitor socket connection status less frequently
   useEffect(() => {
     const checkSocketStatus = () => {
       setSocketConnected(socketService.isConnected());
     };
 
-    const interval = setInterval(checkSocketStatus, 5000);
+    const interval = setInterval(checkSocketStatus, 10000); // Check every 10 seconds instead of 5
     return () => clearInterval(interval);
   }, []);
 
   const handleFriendSelect = (friend: Friend) => {
     setSelectedFriend(friend);
     loadMessages(friend._id);
-    // Close sidebar on mobile after selecting friend
     setSidebarOpen(false);
   };
 
@@ -244,7 +259,6 @@ export default function Chat() {
         messageType,
       };
 
-      // Add file data if it's a file message
       if (messageType === 'file' && fileData) {
         requestData.fileUrl = fileData.fileUrl;
         requestData.fileName = fileData.fileName;
@@ -256,7 +270,6 @@ export default function Chat() {
       if (response.data.success) {
         const newMessage = response.data.data;
         
-        // Add message to local state immediately to avoid waiting for socket
         setMessages(prevMessages => {
           const messageExists = prevMessages.some(msg => msg._id === newMessage._id);
           if (!messageExists) {
@@ -265,7 +278,6 @@ export default function Chat() {
           return prevMessages;
         });
         
-        // Emit via socket for real-time delivery to other user
         if (socketConnected) {
           const socketData: any = {
             recipientId: selectedFriend._id,
@@ -280,8 +292,12 @@ export default function Chat() {
           socketService.emit("send_message", socketData);
         }
 
-        // Update friends list to reflect latest message
-        setTimeout(loadFriends, 100); // Small delay to ensure backend is updated
+        // Update friends list with delay
+        setTimeout(() => {
+          if (!loadingFriendsRef.current) {
+            loadFriends();
+          }
+        }, 200);
       }
     } catch (error) {
       console.error("Failed to send message:", error);
@@ -294,15 +310,7 @@ export default function Chat() {
     removeUser();
     socketService.disconnect();
     navigate("/login");
-    toast.success("Logged out successfully");
-  };
-
-  const handleAddFriend = () => {
-    setShowAddFriend(true);
-  };
-
-  const handleShowFriendRequests = () => {
-    setShowFriendRequests(true);
+    toast.success("Logged out of SwiftTalk successfully");
   };
 
   const onFriendAdded = async () => {
@@ -317,33 +325,38 @@ export default function Chat() {
     toast.success("Friends list updated!");
   };
 
-  const toggleSidebar = () => {
-    setSidebarOpen(!sidebarOpen);
-  };
-
-  // Loading state
   if (loading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gray-50">
+      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-purple-50">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading chat...</p>
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl mb-4 shadow-lg">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+          </div>
+          <h3 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
+            SwiftTalk
+          </h3>
+          <p className="text-gray-600">Connecting you to conversations...</p>
         </div>
       </div>
     );
   }
 
-  // No user found
   if (!user) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gray-50">
+      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-purple-50">
         <div className="text-center">
-          <p className="text-red-600 mb-4">No user session found</p>
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl mb-4 shadow-lg">
+            <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.464 0L4.35 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+          </div>
+          <h3 className="text-xl font-bold text-red-600 mb-2">Session Error</h3>
+          <p className="text-gray-600 mb-4">No user session found</p>
           <button
             onClick={() => navigate('/login')}
             className="btn btn-primary"
           >
-            Go to Login
+            Return to Login
           </button>
         </div>
       </div>
@@ -367,61 +380,66 @@ export default function Chat() {
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
         {/* Header */}
-        <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center">
-              {user.avatar ? (
-                <img
-                  src={user.avatar}
-                  alt={user.username}
-                  className="w-10 h-10 rounded-full object-cover"
-                />
-              ) : (
-                user.username[0].toUpperCase()
-              )}
-            </div>
-            <div>
-              <h2 className="font-semibold text-gray-900 text-sm md:text-base">{user.username}</h2>
-              <div className="flex items-center space-x-2">
-                <div className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                <p className="text-xs text-gray-500">
-                  {socketConnected ? 'Connected' : 'Connecting...'}
-                </p>
+        <div className="p-4 border-b border-gray-200">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center">
+                {user.avatar ? (
+                  <img
+                    src={user.avatar}
+                    alt={user.username}
+                    className="w-10 h-10 rounded-full object-cover"
+                  />
+                ) : (
+                  <span className="text-white font-medium">{user.username[0].toUpperCase()}</span>
+                )}
+              </div>
+              <div>
+                <h2 className="font-semibold text-gray-900 text-sm md:text-base">{user.username}</h2>
+                <div className="flex items-center space-x-2">
+                  <div className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                  <p className="text-xs text-gray-500">
+                    {socketConnected ? 'Connected' : 'Connecting...'}
+                  </p>
+                </div>
               </div>
             </div>
+            
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="lg:hidden p-2 text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
-          
-          {/* Close button for mobile */}
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="lg:hidden p-2 text-gray-500 hover:text-gray-700"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+
+          {/* SwiftTalk Branding */}
+          <div className="text-center">
+            <h1 className="text-lg font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+              SwiftTalk
+            </h1>
+          </div>
         </div>
 
         {/* Action buttons */}
         <div className="p-3 border-b border-gray-200 flex gap-2">
           <button
-            onClick={handleShowFriendRequests}
-            className="btn btn-secondary text-xs flex-1"
-            title="Friend Requests"
+            onClick={() => setShowFriendRequests(true)}
+            className="btn btn-secondary text-xs flex-1 transition-all hover:scale-105"
           >
             Requests
           </button>
           <button
-            onClick={handleAddFriend}
-            className="btn btn-primary text-xs flex-1"
-            title="Add Friend"
+            onClick={() => setShowAddFriend(true)}
+            className="btn btn-primary text-xs flex-1 transition-all hover:scale-105"
           >
             Add Friend
           </button>
           <button
             onClick={handleLogout}
-            className="btn btn-secondary text-xs px-3"
-            title="Logout"
+            className="btn btn-secondary text-xs px-3 transition-all hover:scale-105"
           >
             Logout
           </button>
@@ -452,10 +470,9 @@ export default function Chat() {
           <>
             {/* Chat Header */}
             <div className="p-4 bg-white border-b border-gray-200 flex items-center justify-between">
-              {/* Mobile menu button */}
               <button
-                onClick={toggleSidebar}
-                className="lg:hidden p-2 text-gray-500 hover:text-gray-700 mr-3"
+                onClick={() => setSidebarOpen(true)}
+                className="lg:hidden p-2 text-gray-500 hover:text-gray-700 mr-3 transition-colors"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -463,7 +480,7 @@ export default function Chat() {
               </button>
 
               <div className="flex items-center flex-1 min-w-0">
-                <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center flex-shrink-0">
+                <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
                   {selectedFriend.avatar ? (
                     <img
                       src={selectedFriend.avatar}
@@ -471,7 +488,7 @@ export default function Chat() {
                       className="w-10 h-10 rounded-full object-cover"
                     />
                   ) : (
-                    selectedFriend.username[0].toUpperCase()
+                    <span className="text-white font-medium">{selectedFriend.username[0].toUpperCase()}</span>
                   )}
                 </div>
                 <div className="ml-3 flex-1 min-w-0">
@@ -496,10 +513,9 @@ export default function Chat() {
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center p-4">
-            {/* Mobile menu button */}
             <button
-              onClick={toggleSidebar}
-              className="lg:hidden fixed top-4 left-4 p-3 bg-blue-600 text-white rounded-full shadow-lg z-30"
+              onClick={() => setSidebarOpen(true)}
+              className="lg:hidden fixed top-4 left-4 p-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-full shadow-lg z-30 transition-all hover:scale-110"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -507,12 +523,12 @@ export default function Chat() {
             </button>
 
             <div className="text-center max-w-md mx-auto">
-              <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="w-20 h-20 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
                 <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                 </svg>
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">
+              <h3 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
                 Welcome to SwiftTalk
               </h3>
               <p className="text-gray-600 mb-4">Select a friend to start chatting</p>
@@ -520,8 +536,8 @@ export default function Chat() {
                 <div className="mt-4">
                   <p className="text-gray-500 mb-2">You don't have any friends yet</p>
                   <button
-                    onClick={handleAddFriend}
-                    className="btn btn-primary"
+                    onClick={() => setShowAddFriend(true)}
+                    className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-2 rounded-lg font-medium hover:from-blue-700 hover:to-purple-700 transition-all duration-200 shadow-lg"
                   >
                     Add Your First Friend
                   </button>
@@ -532,7 +548,7 @@ export default function Chat() {
         )}
       </div>
 
-      {/* Add Friend Modal */}
+      {/* Modals */}
       {showAddFriend && (
         <AddFriend
           onClose={() => setShowAddFriend(false)}
@@ -540,7 +556,6 @@ export default function Chat() {
         />
       )}
 
-      {/* Friend Requests Modal */}
       {showFriendRequests && (
         <FriendRequests
           onClose={() => setShowFriendRequests(false)}
