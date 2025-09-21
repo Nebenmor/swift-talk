@@ -56,7 +56,7 @@ export default function Signup() {
     if (password.length >= 8) strength++;
     if (/[a-z]/.test(password)) strength++;
     if (/[A-Z]/.test(password)) strength++;
-    if (/[0-9]/.test(password)) strength++;
+    if (/\d/.test(password)) strength++; // Fixed to use \d instead of [0-9]
     if (/[^A-Za-z0-9]/.test(password)) strength++;
 
     const levels = ['Very Weak', 'Weak', 'Fair', 'Good', 'Strong'];
