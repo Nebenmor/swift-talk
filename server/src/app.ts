@@ -53,20 +53,39 @@ class App {
       this.app.use(morgan('combined'));
     }
 
-    // Rate limiting
-    const limiter = rateLimit({
-      windowMs: config.rateLimit.windowMs,
-      max: config.rateLimit.maxRequests,
+    // More generous rate limiting to prevent the 429 errors
+    const generalLimiter = rateLimit({
+      windowMs: 1 * 60 * 1000, // 1 minute
+      max: 200, // Increased from 100 to 200 requests per minute
       message: {
         success: false,
         message: 'Too many requests from this IP, please try again later.',
       },
       standardHeaders: true,
       legacyHeaders: false,
+      skip: (req) => {
+        // Skip rate limiting for socket.io requests
+        return req.path.includes('socket.io');
+      }
     });
 
-    // Apply rate limiting to API routes
-    this.app.use('/api', limiter);
+    // Separate, more generous rate limiter for friend-related endpoints
+    const friendsLimiter = rateLimit({
+      windowMs: 1 * 60 * 1000, // 1 minute
+      max: 50, // 50 requests per minute for friends endpoints
+      message: {
+        success: false,
+        message: 'Too many friend requests from this IP, please slow down.',
+      },
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
+
+    // Apply general rate limiting to API routes
+    this.app.use('/api', generalLimiter);
+    
+    // Apply specific rate limiting to friends endpoints
+    this.app.use('/api/users/friends', friendsLimiter);
 
     // Body parsing middleware
     this.app.use(express.json({ limit: '10mb' }));
@@ -90,7 +109,7 @@ class App {
             ? 'connected'
             : 'disconnected',
         },
-        'Server is healthy'
+        'SwiftTalk server is healthy'
       );
     });
   }
@@ -103,7 +122,7 @@ class App {
 
     // Catch all for undefined routes
     this.app.all('*', (req: Request, res: Response) => {
-      ResponseUtil.notFound(res, `Route ${req.originalUrl} not found`);
+      ResponseUtil.notFound(res, `Route ${req.originalUrl} not found on SwiftTalk server`);
     });
   }
 
@@ -149,22 +168,20 @@ class App {
         const message =
           config.app.env === 'development'
             ? error.message
-            : 'Internal server error';
+            : 'Internal server error in SwiftTalk';
 
         ResponseUtil.error(res, message, statusCode);
       }
     );
   }
 
-  // FIXED: Remove server starting logic, only handle database connection
   public async start(): Promise<void> {
     try {
-      // Only connect to database - don't start server here
       await database.connect();
-      console.log('✅ Connected to MongoDB:', database.getConnectionStatus());
+      console.log('✅ SwiftTalk connected to MongoDB:', database.getConnectionStatus());
     } catch (error) {
       console.error('Failed to connect to database:', error);
-      throw error; // Re-throw to let server.ts handle it
+      throw error;
     }
   }
 }
