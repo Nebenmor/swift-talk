@@ -12,6 +12,16 @@ import { NotificationService } from "../lib/NotificationService";
 import api from "../lib/api";
 import type { User, Friend, Message } from "../types";
 
+interface ApiError {
+  response?: {
+    status?: number;
+    data?: {
+      message?: string;
+    };
+  };
+  message?: string;
+}
+
 export default function Chat() {
   const [user, setUser] = useState<User | null>(null);
   const [friends, setFriends] = useState<Friend[]>([]);
@@ -46,7 +56,8 @@ export default function Chat() {
       }
     } catch (error) {
       console.error("Failed to load friends:", error);
-      if (error?.response?.status !== 429) {
+      const apiError = error as ApiError;
+      if (apiError.response?.status !== 429) {
         toast.error("Failed to load friends");
       }
     } finally {
@@ -68,7 +79,7 @@ export default function Chat() {
         }, []) || [];
         
         // Sort messages by creation time (oldest first)
-        const sortedMessages = uniqueMessages.sort((a, b) => 
+        const sortedMessages = uniqueMessages.sort((a: Message, b: Message) => 
           new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
         );
         
@@ -105,7 +116,7 @@ export default function Chat() {
       
       // Add message and sort
       const newMessages = [...prevMessages, message];
-      return newMessages.sort((a, b) => 
+      return newMessages.sort((a: Message, b: Message) => 
         new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
       );
     });
@@ -126,8 +137,8 @@ export default function Chat() {
         isFile
       );
       
-      toast.success(`💬 New message from ${message.sender.username}`, {
-        icon: '🔔',
+      toast.success(`New message from ${message.sender.username}`, {
+        icon: '💬',
         duration: 3000,
       });
     }
@@ -192,7 +203,7 @@ export default function Chat() {
           setSocketConnected(false);
         });
         
-        socketService.on("connect_error", (error) => {
+        socketService.on("connect_error", (error: unknown) => {
           console.error('Socket connection error:', error);
           setSocketConnected(false);
         });
@@ -229,20 +240,21 @@ export default function Chat() {
     setSidebarOpen(false);
   };
 
-  const handleSendMessage = async (content: string, messageType: 'text' | 'file' = 'text', fileData?: any) => {
+  const handleSendMessage = async (content: string, messageType: 'text' | 'file' = 'text', fileData?: unknown) => {
     if (!selectedFriend || !user) return;
 
     try {
-      const requestData: any = {
+      const requestData: Record<string, unknown> = {
         recipient: selectedFriend._id,
         content,
         messageType,
       };
 
-      if (messageType === 'file' && fileData) {
-        requestData.fileUrl = fileData.fileUrl;
-        requestData.fileName = fileData.fileName;
-        requestData.fileSize = fileData.fileSize;
+      if (messageType === 'file' && fileData && typeof fileData === 'object' && fileData !== null) {
+        const fileInfo = fileData as { fileUrl: string; fileName: string; fileSize: number };
+        requestData.fileUrl = fileInfo.fileUrl;
+        requestData.fileName = fileInfo.fileName;
+        requestData.fileSize = fileInfo.fileSize;
       }
 
       const response = await api.post('/chat/messages', requestData);
@@ -255,7 +267,7 @@ export default function Chat() {
           const messageExists = prevMessages.some(msg => msg._id === newMessage._id);
           if (!messageExists) {
             const updatedMessages = [...prevMessages, newMessage];
-            return updatedMessages.sort((a, b) => 
+            return updatedMessages.sort((a: Message, b: Message) => 
               new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
             );
           }
@@ -264,7 +276,7 @@ export default function Chat() {
         
         // Emit via socket for real-time delivery to other users
         if (socketConnected) {
-          const socketData: any = {
+          const socketData: Record<string, unknown> = {
             recipientId: selectedFriend._id,
             content,
             messageType,
@@ -308,6 +320,10 @@ export default function Chat() {
     setShowFriendRequests(false);
     await loadFriends();
     toast.success("Friends list updated!");
+  };
+
+  const handleSidebarToggle = () => {
+    setSidebarOpen(!sidebarOpen);
   };
 
   if (loading) {
@@ -355,6 +371,13 @@ export default function Chat() {
         <div 
           className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
           onClick={() => setSidebarOpen(false)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              setSidebarOpen(false);
+            }
+          }}
         />
       )}
 
@@ -433,7 +456,7 @@ export default function Chat() {
         {!socketConnected && (
           <div className="p-2 bg-yellow-50 border-b border-yellow-200">
             <p className="text-xs text-yellow-800 text-center">
-              ⚠️ Real-time messaging temporarily unavailable
+              Real-time messaging temporarily unavailable
             </p>
           </div>
         )}
@@ -455,7 +478,7 @@ export default function Chat() {
             {/* Chat Header */}
             <div className="p-4 bg-white border-b border-gray-200 flex items-center justify-between">
               <button
-                onClick={() => setSidebarOpen(true)}
+                onClick={handleSidebarToggle}
                 className="lg:hidden p-2 text-gray-500 hover:text-gray-700 mr-3 transition-colors"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -498,7 +521,7 @@ export default function Chat() {
         ) : (
           <div className="flex-1 flex items-center justify-center p-4">
             <button
-              onClick={() => setSidebarOpen(true)}
+              onClick={handleSidebarToggle}
               className="lg:hidden fixed top-4 left-4 p-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-full shadow-lg z-30 transition-all hover:scale-110"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
