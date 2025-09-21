@@ -149,7 +149,8 @@ class SocketService {
     }
   }
 
-  on(event: string, callback: (data: unknown) => void) {
+  // FIXED: Use generic callback type to prevent TypeScript errors
+  on(event: string, callback: (data: any) => void) {
     if (this.socket) {
       this.socket.on(event, callback);
     } else {
@@ -157,7 +158,8 @@ class SocketService {
     }
   }
 
-  off(event: string, callback?: (...args: unknown[]) => void) {
+  // FIXED: Use generic callback type for off method
+  off(event: string, callback?: (data: any) => void) {
     if (this.socket) {
       if (callback) {
         this.socket.off(event, callback);
