@@ -137,7 +137,7 @@ class SocketManager {
     }
 
     try {
-      // Send message via service (this will save to database)
+      // FIXED: Send message via service and get the full populated message
       const message = await ChatService.sendMessage(
         user.userId,
         data.recipientId,
@@ -148,10 +148,9 @@ class SocketManager {
 
       console.log(`Message sent from ${user.username} to ${data.recipientId}:`, message.content);
 
-      // Broadcast the message to both sender and recipient
+      // FIXED: Broadcast to recipient only - don't send back to sender to prevent duplicates
       const recipientSocketId = this.userSockets.get(data.recipientId);
       
-      // Send to recipient if they're online
       if (recipientSocketId) {
         console.log(`Broadcasting message to recipient socket: ${recipientSocketId}`);
         this.io.to(recipientSocketId).emit('new_message', message);
@@ -159,8 +158,8 @@ class SocketManager {
         console.log(`Recipient ${data.recipientId} is not online`);
       }
 
-      // Also send back to sender for confirmation (optional)
-      socket.emit('message_sent', { success: true, message });
+      // Send success confirmation to sender (but not the full message to avoid duplicates)
+      socket.emit('message_sent', { success: true, messageId: message._id });
 
     } catch (error) {
       console.error('Error sending message:', error);
@@ -293,23 +292,9 @@ class SocketManager {
     return false;
   }
 
-  public broadcastMessage(message: any): void {
-    // Broadcast message to both sender and recipient
-    const senderSocketId = this.userSockets.get(message.sender._id);
-    const recipientSocketId = this.userSockets.get(message.recipient);
+  // FIXED: Remove the broadcastMessage method that was causing duplicate messages
+  // The ChatService and socket handlers now handle message broadcasting correctly
 
-    if (recipientSocketId) {
-      console.log(`Broadcasting message to recipient: ${message.recipient}`);
-      this.io.to(recipientSocketId).emit('new_message', message);
-    }
-
-    // Optional: Also send to sender for confirmation
-    if (senderSocketId) {
-      this.io.to(senderSocketId).emit('message_sent', { success: true, message });
-    }
-  }
-
-  // Get statistics about connected users
   public getStats(): {
     totalConnections: number;
     uniqueUsers: number;
@@ -323,7 +308,6 @@ class SocketManager {
     };
   }
 
-  // Method to forcibly disconnect a user (for admin purposes)
   public disconnectUser(userId: string): boolean {
     const socketId = this.userSockets.get(userId);
     if (socketId) {
