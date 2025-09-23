@@ -18,6 +18,24 @@ class SocketManager {
     this.io.on('connection', (socket: Socket) => {
       console.log(`Socket connected: ${socket.id}`);
 
+      // Add debugging event listeners
+      socket.on('new_message', (data) => {
+        console.log('=== NEW MESSAGE EVENT RECEIVED ===');
+        console.log('Data:', data);
+        console.log('Socket connected:', socket.connected);
+        console.log('Socket ID:', socket.id);
+      });
+
+      socket.on('message_sent', (data) => {
+        console.log('=== MESSAGE SENT CONFIRMATION ===');
+        console.log('Data:', data);
+      });
+
+      socket.on('message_error', (data) => {
+        console.log('=== MESSAGE ERROR ===');
+        console.log('Error:', data);
+      });
+
       // Handle authentication
       socket.on('authenticate', async (token: string) => {
         try {
@@ -31,12 +49,19 @@ class SocketManager {
 
       // Handle sending messages
       socket.on('send_message', async (data: any) => {
+        console.log('=== EMITTING send_message EVENT ===');
+        console.log('Event: send_message');
+        console.log('Data:', data);
+        console.log('Socket connected:', socket.connected);
+        console.log('Socket ID:', socket.id);
+
         try {
           await this.handleSendMessage(socket, data);
         } catch (error) {
           console.error('Send message error:', error);
-          socket.emit('message_error', { 
-            message: error instanceof Error ? error.message : 'Failed to send message' 
+          socket.emit('message_error', {
+            message:
+              error instanceof Error ? error.message : 'Failed to send message',
           });
         }
       });
@@ -80,64 +105,105 @@ class SocketManager {
     });
   }
 
-  private async handleAuthentication(socket: Socket, token: string): Promise<void> {
-    const decoded = verifyToken(token);
-    const user = await UserService.getUserById(decoded.userId);
+  private async handleAuthentication(
+    socket: Socket,
+    token: string
+  ): Promise<void> {
+    try {
+      const decoded = verifyToken(token);
+      const user = await UserService.getUserById(decoded.userId);
 
-    if (!user) {
-      throw new Error('User not found');
-    }
+      if (!user) {
+        throw new Error('User not found');
+      }
 
-    // Store user connection
-    const socketUser: SocketUser = {
-      userId: user._id,
-      socketId: socket.id,
-      username: user.username,
-    };
+      // CRITICAL FIX: Ensure user ID is always a string for consistent mapping
+      const userId = user._id.toString();
 
-    this.connectedUsers.set(socket.id, socketUser);
-    this.userSockets.set(user._id, socket.id);
+      console.log(`=== AUTHENTICATION DEBUG ===`);
+      console.log(`Authenticating user: ${user.username}`);
+      console.log(`User ID: ${userId} (type: ${typeof userId})`);
+      console.log(`Socket ID: ${socket.id}`);
 
-    // Update user online status
-    await UserService.updateOnlineStatus(user._id, true);
-
-    // Join user to their personal room
-    socket.join(`user_${user._id}`);
-
-    // Notify friends about online status
-    await this.notifyFriendsOnlineStatus(user._id, true);
-
-    // Send authentication success
-    socket.emit('authenticated', {
-      user: {
-        _id: user._id,
+      // Store user connection with consistent string IDs
+      const socketUser: SocketUser = {
+        userId: userId, // Always string
+        socketId: socket.id,
         username: user.username,
-        email: user.email,
-        avatar: user.avatar,
-        isOnline: true,
-      },
-    });
+      };
 
-    console.log(`User authenticated: ${user.username} (${socket.id})`);
+      // CRITICAL: Remove any existing connection for this user first
+      const existingSocketId = this.userSockets.get(userId);
+      if (existingSocketId && existingSocketId !== socket.id) {
+        console.log(
+          `Removing previous connection for user ${userId}: ${existingSocketId}`
+        );
+        this.connectedUsers.delete(existingSocketId);
+      }
+
+      // Store the new connection
+      this.connectedUsers.set(socket.id, socketUser);
+      this.userSockets.set(userId, socket.id);
+
+      console.log(
+        `User mapping updated - UserID: ${userId} -> SocketID: ${socket.id}`
+      );
+      console.log(`Total connected users: ${this.userSockets.size}`);
+      console.log(`Connected user IDs:`, Array.from(this.userSockets.keys()));
+
+      // Update user online status in database
+      await UserService.updateOnlineStatus(userId, true);
+
+      // Join user to their personal room
+      socket.join(`user_${userId}`);
+
+      // Notify friends about online status
+      await this.notifyFriendsOnlineStatus(userId, true);
+
+      // Send authentication success
+      socket.emit('authenticated', {
+        user: {
+          _id: userId,
+          username: user.username,
+          email: user.email,
+          avatar: user.avatar,
+          isOnline: true,
+        },
+      });
+
+      console.log(`✅ User authenticated successfully: ${user.username}`);
+    } catch (error) {
+      console.error('Authentication error:', error);
+      socket.emit('auth_error', { message: 'Authentication failed' });
+      throw error;
+    }
   }
 
-  private async handleSendMessage(socket: Socket, data: {
-    recipientId: string;
-    content: string;
-    messageType?: 'text' | 'file';
-    fileData?: {
-      fileUrl: string;
-      fileName: string;
-      fileSize: number;
-    };
-  }): Promise<void> {
+  private async handleSendMessage(
+    socket: Socket,
+    data: {
+      recipientId: string;
+      content: string;
+      messageType?: 'text' | 'file';
+      fileData?: {
+        fileUrl: string;
+        fileName: string;
+        fileSize: number;
+      };
+      tempId?: string;
+    }
+  ): Promise<void> {
     const user = this.connectedUsers.get(socket.id);
     if (!user) {
       throw new Error('User not authenticated');
     }
 
     try {
-      // FIXED: Send message via service and get the full populated message
+      console.log(
+        `Processing message from ${user.username} to ${data.recipientId}: ${data.content}`
+      );
+
+      // Send message via service - ONLY ONCE
       const message = await ChatService.sendMessage(
         user.userId,
         data.recipientId,
@@ -146,30 +212,41 @@ class SocketManager {
         data.fileData
       );
 
-      console.log(`Message sent from ${user.username} to ${data.recipientId}:`, message.content);
+      console.log(`Message created with ID: ${message._id}`);
 
-      // FIXED: Broadcast to recipient only - don't send back to sender to prevent duplicates
+      // Find recipient socket
       const recipientSocketId = this.userSockets.get(data.recipientId);
-      
+
       if (recipientSocketId) {
-        console.log(`Broadcasting message to recipient socket: ${recipientSocketId}`);
+        console.log(`Broadcasting to recipient: ${recipientSocketId}`);
+        // Send to recipient
         this.io.to(recipientSocketId).emit('new_message', message);
       } else {
-        console.log(`Recipient ${data.recipientId} is not online`);
+        console.log(`Recipient ${data.recipientId} is not connected`);
+        // You could implement push notifications here for offline users
       }
 
-      // Send success confirmation to sender (but not the full message to avoid duplicates)
-      socket.emit('message_sent', { success: true, messageId: message._id });
+      // Send confirmation to sender (NOT the full message to avoid duplicates)
+      socket.emit('message_sent', {
+        success: true,
+        messageId: message._id,
+        tempId: data.tempId, // If you're using temporary IDs
+      });
 
+      // DO NOT emit 'new_message' to sender - they'll add it via API or temp message
     } catch (error) {
       console.error('Error sending message:', error);
-      socket.emit('message_error', { 
-        message: error instanceof Error ? error.message : 'Failed to send message' 
+      socket.emit('message_error', {
+        message:
+          error instanceof Error ? error.message : 'Failed to send message',
       });
     }
   }
 
-  private handleTypingStart(socket: Socket, data: { recipientId: string }): void {
+  private handleTypingStart(
+    socket: Socket,
+    data: { recipientId: string }
+  ): void {
     const user = this.connectedUsers.get(socket.id);
     if (!user) return;
 
@@ -183,7 +260,10 @@ class SocketManager {
     }
   }
 
-  private handleTypingStop(socket: Socket, data: { recipientId: string }): void {
+  private handleTypingStop(
+    socket: Socket,
+    data: { recipientId: string }
+  ): void {
     const user = this.connectedUsers.get(socket.id);
     if (!user) return;
 
@@ -224,19 +304,22 @@ class SocketManager {
     if (!user) return;
 
     await UserService.updateOnlineStatus(user.userId, data.isOnline);
-    
+
     // Notify friends about status change
     await this.notifyFriendsOnlineStatus(user.userId, data.isOnline);
   }
 
-  private async handleDisconnection(socket: Socket, reason: string): Promise<void> {
+  private async handleDisconnection(
+    socket: Socket,
+    reason: string
+  ): Promise<void> {
     console.log(`Socket disconnected: ${socket.id}, reason: ${reason}`);
 
     const user = this.connectedUsers.get(socket.id);
     if (user) {
       // Update user offline status
       await UserService.updateOnlineStatus(user.userId, false);
-      
+
       // Notify friends about offline status
       await this.notifyFriendsOnlineStatus(user.userId, false);
 
@@ -254,7 +337,7 @@ class SocketManager {
   ): Promise<void> {
     try {
       const friends = await UserService.getFriends(userId);
-      
+
       friends.forEach((friend) => {
         const friendSocketId = this.userSockets.get(friend._id);
         if (friendSocketId) {
@@ -284,16 +367,25 @@ class SocketManager {
   }
 
   public emitToUser(userId: string, event: string, data: any): boolean {
+    console.log('=== EMITTING EVENT TO USER ===');
+    console.log('Event:', event);
+    console.log('Data:', data);
+    console.log('Target User ID:', userId);
+
     const socketId = this.userSockets.get(userId);
     if (socketId) {
+      console.log('Socket ID found:', socketId);
+      console.log(
+        'Socket connected:',
+        this.io.sockets.sockets.get(socketId)?.connected
+      );
       this.io.to(socketId).emit(event, data);
       return true;
+    } else {
+      console.warn(`Cannot emit ${event}: User ${userId} socket not found`);
     }
     return false;
   }
-
-  // FIXED: Remove the broadcastMessage method that was causing duplicate messages
-  // The ChatService and socket handlers now handle message broadcasting correctly
 
   public getStats(): {
     totalConnections: number;
@@ -304,7 +396,7 @@ class SocketManager {
     return {
       totalConnections: this.connectedUsers.size,
       uniqueUsers: this.userSockets.size,
-      usersList: connectedUsers.map(user => user.username),
+      usersList: connectedUsers.map((user) => user.username),
     };
   }
 

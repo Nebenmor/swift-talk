@@ -6,13 +6,30 @@ import { AuthRequest } from '../types';
 export class ChatController {
   static readonly sendMessage = handleAsyncError(async (req: AuthRequest, res: Response) => {
     const senderId = req.user!._id;
-    const { recipient, content, messageType = 'text' } = req.body;
+    const { recipient, content, messageType = 'text', fileUrl, fileName, fileSize } = req.body;
+    
+    console.log('=== SEND MESSAGE DEBUG ===');
+    console.log('Request body:', req.body);
+    console.log('Message type:', messageType);
+    console.log('File data:', { fileUrl, fileName, fileSize });
+    
+    // FIXED: Validate file message data
+    if (messageType === 'file') {
+      if (!fileUrl || !fileName || fileSize === undefined) {
+        return ResponseUtil.error(
+          res, 
+          'File messages require fileUrl, fileName, and fileSize', 
+          400
+        );
+      }
+    }
     
     const message = await ChatService.sendMessage(
       senderId,
       recipient,
       content,
-      messageType
+      messageType,
+      messageType === 'file' ? { fileUrl, fileName, fileSize } : undefined
     );
     
     ResponseUtil.success(

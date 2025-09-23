@@ -1,6 +1,6 @@
-import { useState, useRef } from 'react';
-import toast from 'react-hot-toast';
-import api from '../lib/api';
+import { useState, useRef } from "react";
+import toast from "react-hot-toast";
+import api from "../lib/api";
 
 interface FileData {
   fileUrl: string;
@@ -9,7 +9,11 @@ interface FileData {
 }
 
 interface MessageInputProps {
-  readonly onSendMessage: (content: string, messageType?: 'text' | 'file', fileData?: FileData) => void;
+  readonly onSendMessage: (
+    content: string,
+    messageType?: "text" | "file",
+    fileData?: FileData
+  ) => void;
   readonly disabled?: boolean;
 }
 
@@ -23,8 +27,11 @@ interface ApiError {
   message?: string;
 }
 
-export default function MessageInput({ onSendMessage, disabled = false }: MessageInputProps) {
-  const [message, setMessage] = useState('');
+export default function MessageInput({
+  onSendMessage,
+  disabled = false,
+}: MessageInputProps) {
+  const [message, setMessage] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -33,16 +40,16 @@ export default function MessageInput({ onSendMessage, disabled = false }: Messag
     e.preventDefault();
     if (message.trim() && !disabled && !isUploading) {
       onSendMessage(message.trim());
-      setMessage('');
+      setMessage("");
       // Reset textarea height
       if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = "auto";
       }
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey && !disabled && !isUploading) {
+    if (e.key === "Enter" && !e.shiftKey && !disabled && !isUploading) {
       e.preventDefault();
       handleSubmit(e as React.FormEvent);
     }
@@ -50,10 +57,10 @@ export default function MessageInput({ onSendMessage, disabled = false }: Messag
 
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setMessage(e.target.value);
-    
+
     // Auto-resize textarea
     const textarea = e.target;
-    textarea.style.height = 'auto';
+    textarea.style.height = "auto";
     const scrollHeight = textarea.scrollHeight;
     const maxHeight = 120; // Max height in pixels
     textarea.style.height = `${Math.min(scrollHeight, maxHeight)}px`;
@@ -66,19 +73,27 @@ export default function MessageInput({ onSendMessage, disabled = false }: Messag
     // Check file size (10MB limit)
     const maxSize = 10 * 1024 * 1024; // 10MB
     if (file.size > maxSize) {
-      toast.error('File size must be less than 10MB');
+      toast.error("File size must be less than 10MB");
       return;
     }
 
     // Check file type
     const allowedTypes = [
-      'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
-      'application/pdf', 'text/plain', 'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/gif",
+      "image/webp",
+      "application/pdf",
+      "text/plain",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ];
 
     if (!allowedTypes.includes(file.type)) {
-      toast.error('File type not supported. Please upload images, PDFs, or documents.');
+      toast.error(
+        "File type not supported. Please upload images, PDFs, or documents."
+      );
       return;
     }
 
@@ -86,45 +101,95 @@ export default function MessageInput({ onSendMessage, disabled = false }: Messag
 
     try {
       const formData = new FormData();
-      formData.append('file', file);
-      
-      // FIXED: Upload file first to get URL
-      const uploadResponse = await api.post('/chat/upload', formData, {
+      formData.append("file", file);
+
+      console.log("=== FILE UPLOAD DEBUG ===");
+      console.log("File details:", {
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      });
+
+      // Upload file first to get URL
+      const uploadResponse = await api.post("/chat/upload", formData, {
         headers: {
-          'Content-Type': 'multipart/form-data',
+          "Content-Type": "multipart/form-data",
         },
       });
 
+      console.log("Upload response:", uploadResponse.data);
+
       if (uploadResponse.data.success) {
         const fileData = uploadResponse.data.data;
-        
-        console.log('File uploaded successfully:', fileData);
-        
-        // FIXED: Send file message with correct data structure
+
         const fileInfo: FileData = {
           fileUrl: fileData.url,
           fileName: file.name,
           fileSize: file.size,
         };
-        
-        // Send the file message
-        onSendMessage(file.name, 'file', fileInfo);
-        
-        toast.success('File uploaded and sent successfully!');
-      } else {
-        toast.error('File upload failed');
+
+        console.log("File info being sent:", fileInfo);
+
+        // Send the file message with proper content format
+        onSendMessage(`📎 ${file.name}`, "file", fileInfo);
+
+        toast.success("File uploaded and sent successfully!");
       }
     } catch (error) {
-      console.error('File upload failed:', error);
+      console.error("=== FILE UPLOAD ERROR ===");
+      console.error("Error details:", error);
+      console.error("File upload failed:", error);
       const apiError = error as ApiError;
-      const errorMessage = apiError.response?.data?.message || 'File upload failed';
+      const errorMessage =
+        apiError.response?.data?.message || "File upload failed";
       toast.error(errorMessage);
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+        fileInputRef.current.value = "";
       }
     }
+  };
+
+  // Extract button title logic to reduce nested ternaries
+  const getFileButtonTitle = (): string => {
+    if (disabled) return "Connecting...";
+    if (isUploading) return "Uploading...";
+    return "Attach file";
+  };
+
+  const getSendButtonTitle = (): string => {
+    if (disabled) return "Connecting...";
+    if (!message.trim()) return "Type a message";
+    return "Send message";
+  };
+
+  const getFileButtonClasses = (): string => {
+    const baseClasses = "p-3 rounded-full transition-all duration-200";
+    if (isUploading || disabled) {
+      return `${baseClasses} bg-gray-100 text-gray-400 cursor-not-allowed`;
+    }
+    return `${baseClasses} bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-800 active:scale-95`;
+  };
+
+  const getSendButtonClasses = (): string => {
+    const baseClasses = "p-3 rounded-full transition-all duration-200";
+    if (!message.trim() || disabled || isUploading) {
+      return `${baseClasses} bg-gray-100 text-gray-400 cursor-not-allowed`;
+    }
+    return `${baseClasses} bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700 active:scale-95 shadow-lg`;
+  };
+
+  const getPlaceholderText = (): string => {
+    return disabled ? "Connecting to SwiftTalk..." : "Type your message...";
+  };
+
+  const getTextareaClasses = (): string => {
+    const baseClasses = "w-full px-4 py-3 pr-12 border border-gray-300 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all";
+    if (disabled) {
+      return `${baseClasses} opacity-50 cursor-not-allowed bg-gray-50`;
+    }
+    return `${baseClasses} bg-white`;
   };
 
   return (
@@ -136,18 +201,16 @@ export default function MessageInput({ onSendMessage, disabled = false }: Messag
             value={message}
             onChange={handleTextareaChange}
             onKeyDown={handleKeyDown}
-            placeholder={disabled ? "Connecting to SwiftTalk..." : "Type your message..."}
-            className={`w-full px-4 py-3 pr-12 border border-gray-300 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all ${
-              disabled ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'bg-white'
-            }`}
+            placeholder={getPlaceholderText()}
+            className={getTextareaClasses()}
             rows={1}
-            style={{ 
-              minHeight: '48px', 
-              maxHeight: '120px',
+            style={{
+              minHeight: "48px",
+              maxHeight: "120px",
             }}
             disabled={disabled || isUploading}
           />
-          
+
           {/* Character count for long messages */}
           {message.length > 800 && (
             <div className="absolute -top-6 right-0 text-xs text-gray-500">
@@ -168,20 +231,28 @@ export default function MessageInput({ onSendMessage, disabled = false }: Messag
           />
           <button
             type="button"
-            onClick={() => !disabled && !isUploading && fileInputRef.current?.click()}
+            onClick={() =>
+              !disabled && !isUploading && fileInputRef.current?.click()
+            }
             disabled={isUploading || disabled}
-            className={`p-3 rounded-full transition-all duration-200 ${
-              isUploading || disabled
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-800 active:scale-95'
-            }`}
-            title={disabled ? "Connecting..." : isUploading ? "Uploading..." : "Attach file"}
+            className={getFileButtonClasses()}
+            title={getFileButtonTitle()}
           >
             {isUploading ? (
               <div className="animate-spin w-5 h-5 border-2 border-gray-400 border-t-transparent rounded-full" />
             ) : (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+                />
               </svg>
             )}
           </button>
@@ -190,32 +261,38 @@ export default function MessageInput({ onSendMessage, disabled = false }: Messag
           <button
             type="submit"
             disabled={!message.trim() || disabled || isUploading}
-            className={`p-3 rounded-full transition-all duration-200 ${
-              !message.trim() || disabled || isUploading
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700 active:scale-95 shadow-lg'
-            }`}
-            title={disabled ? "Connecting..." : !message.trim() ? "Type a message" : "Send message"}
+            className={getSendButtonClasses()}
+            title={getSendButtonTitle()}
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+              />
             </svg>
           </button>
         </div>
       </form>
-      
+
       {/* Status messages */}
       {disabled && (
-        <p className="text-xs text-gray-500 mt-2 text-center">
+        <div className="text-xs text-gray-500 mt-2 text-center">
           Connecting to SwiftTalk... Messages will be sent once connected.
-        </p>
+        </div>
       )}
-      
+
       {isUploading && (
-        <p className="text-xs text-blue-600 mt-2 text-center flex items-center justify-center">
+        <div className="text-xs text-blue-600 mt-2 text-center flex items-center justify-center">
           <div className="animate-pulse w-2 h-2 bg-blue-600 rounded-full mr-2"></div>
           Uploading file to SwiftTalk...
-        </p>
+        </div>
       )}
     </div>
   );

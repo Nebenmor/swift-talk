@@ -1,9 +1,25 @@
+// Updated chatService.ts with proper file URL handling
 import { Message } from '../models/Message';
 import { Friendship } from '../models/Friendship';
 import { User } from '../models/User';
 import { ChatMessage, PaginatedResponse, FileUploadResult } from '../types';
+import { config } from '../config/config';
 
 export class ChatService {
+  // Helper method to create absolute file URLs
+  private static getAbsoluteFileUrl(fileUrl: string): string {
+    if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+      return fileUrl;
+    }
+    
+    // Ensure fileUrl starts with /
+    const normalizedFileUrl = fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`;
+    
+    // Return full URL with server base
+    const serverUrl = `http://localhost:${config.app.port}`;
+    return `${serverUrl}${normalizedFileUrl}`;
+  }
+
   static async sendMessage(
     senderId: string,
     recipientId: string,
@@ -37,7 +53,8 @@ export class ChatService {
 
     // Add file data if it's a file message
     if (messageType === 'file' && fileData) {
-      messageData.fileUrl = fileData.fileUrl;
+      // Convert relative URLs to absolute URLs
+      messageData.fileUrl = this.getAbsoluteFileUrl(fileData.fileUrl);
       messageData.fileName = fileData.fileName;
       messageData.fileSize = fileData.fileSize;
     }
@@ -117,7 +134,8 @@ export class ChatService {
       recipient: message.recipient.toString(),
       content: message.content,
       messageType: message.messageType,
-      fileUrl: message.fileUrl,
+      // Convert relative URLs to absolute URLs
+      fileUrl: message.fileUrl ? this.getAbsoluteFileUrl(message.fileUrl) : undefined,
       fileName: message.fileName,
       fileSize: message.fileSize,
       isRead: message.isRead,
@@ -135,6 +153,51 @@ export class ChatService {
     };
   }
 
+  static async uploadFile(
+    file: Express.Multer.File,
+    uploaderId: string
+  ): Promise<FileUploadResult> {
+    // Return relative path for storage, but we'll convert to absolute when serving
+    const fileUrl = `/uploads/${file.filename}`;
+    
+    return {
+      url: fileUrl, // Store as relative path
+      filename: file.filename,
+      originalName: file.originalname,
+      size: file.size,
+      mimetype: file.mimetype,
+    };
+  }
+
+  static async getMessageById(messageId: string): Promise<ChatMessage | null> {
+    const message = await Message.findById(messageId)
+      .populate('sender', 'username avatar')
+      .lean();
+
+    if (!message) {
+      return null;
+    }
+
+    return {
+      _id: message._id.toString(),
+      sender: {
+        _id: (message.sender as any)._id.toString(),
+        username: (message.sender as any).username,
+        avatar: (message.sender as any).avatar,
+      },
+      recipient: message.recipient.toString(),
+      content: message.content,
+      messageType: message.messageType,
+      // Convert relative URLs to absolute URLs
+      fileUrl: message.fileUrl ? this.getAbsoluteFileUrl(message.fileUrl) : undefined,
+      fileName: message.fileName,
+      fileSize: message.fileSize,
+      isRead: message.isRead,
+      createdAt: message.createdAt || new Date(),
+    };
+  }
+
+  // Other methods remain the same...
   static async markMessagesAsRead(
     senderId: string,
     recipientId: string
@@ -185,6 +248,12 @@ export class ChatService {
     await Message.findByIdAndDelete(messageId);
   }
 
+  static async isUserOnline(userId: string): Promise<boolean> {
+    const user = await User.findById(userId).select('isOnline');
+    return user?.isOnline || false;
+  }
+
+  // Add other missing methods...
   static async searchMessages(
     userId: string,
     query: string,
@@ -234,7 +303,7 @@ export class ChatService {
       recipient: message.recipient._id ? message.recipient._id.toString() : message.recipient,
       content: message.content,
       messageType: message.messageType,
-      fileUrl: message.fileUrl,
+      fileUrl: message.fileUrl ? this.getAbsoluteFileUrl(message.fileUrl) : undefined,
       fileName: message.fileName,
       fileSize: message.fileSize,
       isRead: message.isRead,
@@ -299,7 +368,10 @@ export class ChatService {
             isOnline: friend.isOnline,
             lastSeen: friend.lastSeen,
           },
-          lastMessage,
+          lastMessage: lastMessage ? {
+            ...lastMessage,
+            fileUrl: lastMessage.fileUrl ? this.getAbsoluteFileUrl(lastMessage.fileUrl) : undefined
+          } : null,
           unreadCount,
           updatedAt: lastMessage ? lastMessage.createdAt : new Date(),
         };
@@ -312,52 +384,5 @@ export class ChatService {
       const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
       return bTime - aTime;
     });
-  }
-
-  static async uploadFile(
-    file: Express.Multer.File,
-    uploaderId: string
-  ): Promise<FileUploadResult> {
-    const fileUrl = `/uploads/${file.filename}`;
-    
-    return {
-      url: fileUrl,
-      filename: file.filename,
-      originalName: file.originalname,
-      size: file.size,
-      mimetype: file.mimetype,
-    };
-  }
-
-  static async getMessageById(messageId: string): Promise<ChatMessage | null> {
-    const message = await Message.findById(messageId)
-      .populate('sender', 'username avatar')
-      .lean();
-
-    if (!message) {
-      return null;
-    }
-
-    return {
-      _id: message._id.toString(),
-      sender: {
-        _id: (message.sender as any)._id.toString(),
-        username: (message.sender as any).username,
-        avatar: (message.sender as any).avatar,
-      },
-      recipient: message.recipient.toString(),
-      content: message.content,
-      messageType: message.messageType,
-      fileUrl: message.fileUrl,
-      fileName: message.fileName,
-      fileSize: message.fileSize,
-      isRead: message.isRead,
-      createdAt: message.createdAt || new Date(),
-    };
-  }
-
-  static async isUserOnline(userId: string): Promise<boolean> {
-    const user = await User.findById(userId).select('isOnline');
-    return user?.isOnline || false;
   }
 }

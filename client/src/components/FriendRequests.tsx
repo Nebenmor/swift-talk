@@ -16,6 +16,15 @@ interface FriendRequestsProps {
   readonly onRequestHandled: () => void;
 }
 
+// Proper error type instead of any
+interface ApiError {
+  response?: {
+    data?: {
+      message?: string;
+    };
+  };
+}
+
 export default function FriendRequests({ onClose, onRequestHandled }: FriendRequestsProps) {
   const [pendingRequests, setPendingRequests] = useState<FriendRequest[]>([]);
   const [sentRequests, setSentRequests] = useState<FriendRequest[]>([]);
@@ -60,14 +69,11 @@ export default function FriendRequests({ onClose, onRequestHandled }: FriendRequ
         setPendingRequests(prev => prev.filter(req => req.requestId !== requestId));
         onRequestHandled();
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to accept request:', error);
       
-      let message = 'Failed to accept friend request';
-      if (error?.response?.data?.message) {
-        message = error.response.data.message;
-      }
-      
+      const apiError = error as ApiError;
+      const message = apiError.response?.data?.message || 'Failed to accept friend request';
       toast.error(message);
     } finally {
       setProcessingRequest(null);
@@ -84,14 +90,11 @@ export default function FriendRequests({ onClose, onRequestHandled }: FriendRequ
         setPendingRequests(prev => prev.filter(req => req.requestId !== requestId));
         onRequestHandled();
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to decline request:', error);
       
-      let message = 'Failed to decline friend request';
-      if (error?.response?.data?.message) {
-        message = error.response.data.message;
-      }
-      
+      const apiError = error as ApiError;
+      const message = apiError.response?.data?.message || 'Failed to decline friend request';
       toast.error(message);
     } finally {
       setProcessingRequest(null);
@@ -101,7 +104,6 @@ export default function FriendRequests({ onClose, onRequestHandled }: FriendRequ
   const handleCancelRequest = async (requestId: string) => {
     setProcessingRequest(requestId);
     try {
-      // For sent requests, we use the decline endpoint which will delete the request
       const response = await api.put(`/users/friends/requests/${requestId}/decline`);
       
       if (response.data.success) {
@@ -109,14 +111,11 @@ export default function FriendRequests({ onClose, onRequestHandled }: FriendRequ
         setSentRequests(prev => prev.filter(req => req.requestId !== requestId));
         onRequestHandled();
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to cancel request:', error);
       
-      let message = 'Failed to cancel friend request';
-      if (error?.response?.data?.message) {
-        message = error.response.data.message;
-      }
-      
+      const apiError = error as ApiError;
+      const message = apiError.response?.data?.message || 'Failed to cancel friend request';
       toast.error(message);
     } finally {
       setProcessingRequest(null);

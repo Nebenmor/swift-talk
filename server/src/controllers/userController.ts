@@ -79,25 +79,27 @@ export class UserController {
         'Friend request sent successfully',
         201
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Friend request error:', error);
       
-      // Provide user-friendly error messages with appropriate status codes
-      let statusCode = 400; // Default to client error
-      let message = error.message || 'Failed to send friend request';
+      // Proper error handling with unknown type
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send friend request';
       
-      // Categorize errors for better user experience
-      if (message.includes('User not found')) {
+      // Fixed: Remove redundant assignment - determine status code based on error message
+      let statusCode: number;
+      if (errorMessage.includes('User not found')) {
         statusCode = 404;
-      } else if (message.includes('already sent') || message.includes('already friends') || message.includes('already sent you')) {
+      } else if (errorMessage.includes('already sent') || errorMessage.includes('already friends') || errorMessage.includes('already sent you')) {
         statusCode = 409; // Conflict
-      } else if (message.includes('Cannot send friend request to this user') || message.includes('blocked')) {
+      } else if (errorMessage.includes('Cannot send friend request to this user') || errorMessage.includes('blocked')) {
         statusCode = 403; // Forbidden
-      } else if (message.includes('Cannot send friend request to yourself')) {
+      } else if (errorMessage.includes('Cannot send friend request to yourself')) {
         statusCode = 400; // Bad request
+      } else {
+        statusCode = 400; // Default
       }
       
-      return ResponseUtil.error(res, message, statusCode);
+      return ResponseUtil.error(res, errorMessage, statusCode);
     }
   });
 
@@ -120,9 +122,7 @@ export class UserController {
   static readonly acceptFriendRequest = handleAsyncError(async (req: AuthRequest, res: Response) => {
     console.log('=== ACCEPT REQUEST CONTROLLER DEBUG ===');
     console.log('User ID from req.user:', req.user!._id);
-    console.log('User object:', req.user);
     console.log('Request ID from params:', req.params.requestId);
-    console.log('Full params:', req.params);
     
     const userId = req.user!._id;
     const { requestId } = req.params;
@@ -130,49 +130,56 @@ export class UserController {
     try {
       await UserService.acceptFriendRequest(userId, requestId);
       ResponseUtil.success(res, null, 'Friend request accepted');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Accept request error:', error);
       
-      let statusCode = 400;
-      if (error.message.includes('not found')) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to accept friend request';
+      
+      // Fixed: Remove redundant assignment - determine status code based on error message
+      let statusCode: number;
+      if (errorMessage.includes('not found')) {
         statusCode = 404;
-      } else if (error.message.includes('not authorized')) {
+      } else if (errorMessage.includes('not authorized')) {
         statusCode = 403;
-      } else if (error.message.includes('already processed')) {
+      } else if (errorMessage.includes('already processed')) {
         statusCode = 409;
+      } else {
+        statusCode = 400;
       }
       
-      return ResponseUtil.error(res, error.message, statusCode);
+      return ResponseUtil.error(res, errorMessage, statusCode);
     }
   });
 
   static readonly declineFriendRequest = handleAsyncError(async (req: AuthRequest, res: Response) => {
     console.log('=== DECLINE REQUEST CONTROLLER DEBUG ===');
     console.log('User ID from req.user:', req.user!._id);
-    console.log('User object:', req.user);
     console.log('Request ID from params:', req.params.requestId);
-    console.log('Full params:', req.params);
     
     const userId = req.user!._id;
     const { requestId } = req.params;
     
     try {
-      // Check if this is the user declining a request they received or canceling one they sent
       const result = await UserService.declineFriendRequest(userId, requestId);
       ResponseUtil.success(res, null, result.message || 'Friend request declined');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Decline request error:', error);
       
-      let statusCode = 400;
-      if (error.message.includes('not found')) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to decline friend request';
+      
+      // Fixed: Remove redundant assignment - determine status code based on error message  
+      let statusCode: number;
+      if (errorMessage.includes('not found')) {
         statusCode = 404;
-      } else if (error.message.includes('not authorized')) {
+      } else if (errorMessage.includes('not authorized')) {
         statusCode = 403;
-      } else if (error.message.includes('already processed')) {
+      } else if (errorMessage.includes('already processed')) {
         statusCode = 409;
+      } else {
+        statusCode = 400;
       }
       
-      return ResponseUtil.error(res, error.message, statusCode);
+      return ResponseUtil.error(res, errorMessage, statusCode);
     }
   });
 
@@ -183,9 +190,10 @@ export class UserController {
     try {
       await UserService.removeFriend(userId, friendId);
       ResponseUtil.success(res, null, 'Friend removed successfully');
-    } catch (error: any) {
-      const statusCode = error.message.includes('not found') ? 404 : 400;
-      return ResponseUtil.error(res, error.message, statusCode);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to remove friend';
+      const statusCode = errorMessage.includes('not found') ? 404 : 400;
+      return ResponseUtil.error(res, errorMessage, statusCode);
     }
   });
 
@@ -196,15 +204,19 @@ export class UserController {
     try {
       await UserService.blockUser(userId, blockedId);
       ResponseUtil.success(res, null, 'User blocked successfully');
-    } catch (error: any) {
-      let statusCode = 400;
-      if (error.message.includes('Cannot block yourself')) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to block user';
+      
+      let statusCode: number;
+      if (errorMessage.includes('Cannot block yourself')) {
         statusCode = 400;
-      } else if (error.message.includes('already blocked')) {
+      } else if (errorMessage.includes('already blocked')) {
         statusCode = 409;
+      } else {
+        statusCode = 400;
       }
       
-      return ResponseUtil.error(res, error.message, statusCode);
+      return ResponseUtil.error(res, errorMessage, statusCode);
     }
   });
 

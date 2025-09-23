@@ -30,7 +30,8 @@ export class AuthController {
   });
 
   static readonly logout = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    // Fixed: Remove unnecessary assertion
+    const userId = req.user!._id;
     
     await AuthService.logout(userId);
     
@@ -42,7 +43,8 @@ export class AuthController {
   });
 
   static readonly getCurrentUser = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    // Fixed: Remove unnecessary assertion
+    const userId = req.user!._id;
     
     const user = await AuthService.getCurrentUser(userId);
     
@@ -54,12 +56,13 @@ export class AuthController {
   });
 
   static readonly updateProfile = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    // Fixed: Remove unnecessary assertion
+    const userId = req.user!._id;
     const updateData = req.body;
     
     // Only allow specific fields to be updated
     const allowedFields = ['email', 'avatar'];
-    const filteredData: any = {};
+    const filteredData: Record<string, unknown> = {};
     
     allowedFields.forEach(field => {
       if (updateData[field] !== undefined) {
@@ -77,7 +80,8 @@ export class AuthController {
   });
 
   static readonly changePassword = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    // Fixed: Remove unnecessary assertion
+    const userId = req.user!._id;
     const { currentPassword, newPassword } = req.body;
     
     if (!currentPassword || !newPassword) {
@@ -98,7 +102,8 @@ export class AuthController {
   });
 
   static readonly refreshToken = handleAsyncError(async (req: AuthRequest, res: Response) => {
-    const userId = req.user!._id!;
+    // Fixed: Remove unnecessary assertion
+    const userId = req.user!._id;
     
     const token = await AuthService.refreshToken(userId);
     

@@ -1,4 +1,4 @@
-import type { Friend } from '../types';
+import type { Friend, Message } from '../types';
 
 interface FriendsListProps {
   readonly friends: Friend[];
@@ -7,7 +7,8 @@ interface FriendsListProps {
 }
 
 export default function FriendsList({ friends, selectedFriend, onFriendSelect }: FriendsListProps) {
-  const formatLastMessage = (message: any) => {
+  // Properly typed message parameter
+  const formatLastMessage = (message: Message | undefined): string => {
     if (!message) return 'No messages yet';
     return message.messageType === 'file' ? 'File' : message.content;
   };
