@@ -27,12 +27,19 @@ interface ApiError {
   message?: string;
 }
 
+interface FilePreview {
+  file: File;
+  previewUrl: string;
+  fileData?: FileData;
+}
+
 export default function MessageInput({
   onSendMessage,
   disabled = false,
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+  const [filePreview, setFilePreview] = useState<FilePreview | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -66,9 +73,26 @@ export default function MessageInput({
     textarea.style.height = `${Math.min(scrollHeight, maxHeight)}px`;
   };
 
+  const createFilePreview = (file: File): string => {
+    if (file.type.startsWith('image/')) {
+      return URL.createObjectURL(file);
+    }
+    return '';
+  };
+
+  const clearFilePreview = () => {
+    if (filePreview?.previewUrl) {
+      URL.revokeObjectURL(filePreview.previewUrl);
+    }
+    setFilePreview(null);
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || disabled) return;
+
+    // Clear previous preview
+    clearFilePreview();
 
     // Check file size (10MB limit)
     const maxSize = 10 * 1024 * 1024; // 10MB
@@ -97,18 +121,18 @@ export default function MessageInput({
       return;
     }
 
+    // Create preview
+    const previewUrl = createFilePreview(file);
+    setFilePreview({
+      file,
+      previewUrl,
+    });
+
     setIsUploading(true);
 
     try {
       const formData = new FormData();
       formData.append("file", file);
-
-      console.log("=== FILE UPLOAD DEBUG ===");
-      console.log("File details:", {
-        name: file.name,
-        size: file.size,
-        type: file.type,
-      });
 
       // Upload file first to get URL
       const uploadResponse = await api.post("/chat/upload", formData, {
@@ -117,32 +141,27 @@ export default function MessageInput({
         },
       });
 
-      console.log("Upload response:", uploadResponse.data);
-
       if (uploadResponse.data.success) {
-        const fileData = uploadResponse.data.data;
+        const uploadedFileData = uploadResponse.data.data;
 
         const fileInfo: FileData = {
-          fileUrl: fileData.url,
+          fileUrl: uploadedFileData.url,
           fileName: file.name,
           fileSize: file.size,
         };
 
-        console.log("File info being sent:", fileInfo);
+        // Update preview with uploaded file data
+        setFilePreview(prev => prev ? { ...prev, fileData: fileInfo } : null);
 
-        // Send the file message with proper content format
-        onSendMessage(`📎 ${file.name}`, "file", fileInfo);
-
-        toast.success("File uploaded and sent successfully!");
+        toast.success("File uploaded successfully! You can now send it.");
       }
     } catch (error) {
-      console.error("=== FILE UPLOAD ERROR ===");
-      console.error("Error details:", error);
       console.error("File upload failed:", error);
       const apiError = error as ApiError;
       const errorMessage =
         apiError.response?.data?.message || "File upload failed";
       toast.error(errorMessage);
+      clearFilePreview();
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) {
@@ -151,49 +170,125 @@ export default function MessageInput({
     }
   };
 
-  // Extract button title logic to reduce nested ternaries
-  const getFileButtonTitle = (): string => {
-    if (disabled) return "Connecting...";
-    if (isUploading) return "Uploading...";
-    return "Attach file";
-  };
-
-  const getSendButtonTitle = (): string => {
-    if (disabled) return "Connecting...";
-    if (!message.trim()) return "Type a message";
-    return "Send message";
-  };
-
-  const getFileButtonClasses = (): string => {
-    const baseClasses = "p-3 rounded-full transition-all duration-200";
-    if (isUploading || disabled) {
-      return `${baseClasses} bg-gray-100 text-gray-400 cursor-not-allowed`;
+  const sendFileMessage = () => {
+    if (filePreview?.fileData) {
+      onSendMessage(`📎 ${filePreview.file.name}`, "file", filePreview.fileData);
+      clearFilePreview();
+      toast.success("File message sent!");
     }
-    return `${baseClasses} bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-800 active:scale-95`;
   };
 
-  const getSendButtonClasses = (): string => {
-    const baseClasses = "p-3 rounded-full transition-all duration-200";
-    if (!message.trim() || disabled || isUploading) {
-      return `${baseClasses} bg-gray-100 text-gray-400 cursor-not-allowed`;
-    }
-    return `${baseClasses} bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700 active:scale-95 shadow-lg`;
-  };
-
-  const getPlaceholderText = (): string => {
-    return disabled ? "Connecting to SwiftTalk..." : "Type your message...";
-  };
-
-  const getTextareaClasses = (): string => {
-    const baseClasses = "w-full px-4 py-3 pr-12 border border-gray-300 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all";
+  // SonarQube fix: Separate methods instead of using disabled prop for multiple actions
+  const getFileButtonConfig = () => {
     if (disabled) {
-      return `${baseClasses} opacity-50 cursor-not-allowed bg-gray-50`;
+      return {
+        title: "Connecting...",
+        classes: "p-3 rounded-full transition-all duration-200 bg-gray-100 text-gray-400 cursor-not-allowed",
+        onClick: () => {},
+        disabled: true
+      };
     }
-    return `${baseClasses} bg-white`;
+    if (isUploading) {
+      return {
+        title: "Uploading...",
+        classes: "p-3 rounded-full transition-all duration-200 bg-gray-100 text-gray-400 cursor-not-allowed",
+        onClick: () => {},
+        disabled: true
+      };
+    }
+    return {
+      title: "Attach file",
+      classes: "p-3 rounded-full transition-all duration-200 bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-800 active:scale-95",
+      onClick: () => fileInputRef.current?.click(),
+      disabled: false
+    };
   };
+
+  const getSendButtonConfig = () => {
+    const hasContent = message.trim() || filePreview?.fileData;
+    
+    if (disabled) {
+      return {
+        title: "Connecting...",
+        classes: "p-3 rounded-full transition-all duration-200 bg-gray-100 text-gray-400 cursor-not-allowed",
+        onClick: () => {},
+        disabled: true
+      };
+    }
+    if (!hasContent || isUploading) {
+      return {
+        title: !hasContent ? "Type a message or select a file" : "Uploading...",
+        classes: "p-3 rounded-full transition-all duration-200 bg-gray-100 text-gray-400 cursor-not-allowed",
+        onClick: () => {},
+        disabled: true
+      };
+    }
+    return {
+      title: "Send message",
+      classes: "p-3 rounded-full transition-all duration-200 bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700 active:scale-95 shadow-lg",
+      onClick: filePreview?.fileData ? sendFileMessage : (e: React.FormEvent) => handleSubmit(e),
+      disabled: false
+    };
+  };
+
+  const handleSendClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (filePreview?.fileData) {
+      sendFileMessage();
+    } else {
+      handleSubmit(e as unknown as React.FormEvent);
+    }
+  };
+
+  const fileButtonConfig = getFileButtonConfig();
+  const sendButtonConfig = getSendButtonConfig();
 
   return (
     <div className="p-3 md:p-4 bg-white border-t border-gray-200">
+      {/* File Preview */}
+      {filePreview && (
+        <div className="mb-3 p-3 bg-gray-50 rounded-lg border">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              {filePreview.previewUrl ? (
+                <img
+                  src={filePreview.previewUrl}
+                  alt={filePreview.file.name}
+                  className="w-12 h-12 object-cover rounded border"
+                />
+              ) : (
+                <div className="w-12 h-12 bg-gray-200 rounded border flex items-center justify-center">
+                  <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  </svg>
+                </div>
+              )}
+              <div className="flex-1">
+                <p className="text-sm font-medium text-gray-900 truncate">{filePreview.file.name}</p>
+                <p className="text-xs text-gray-500">
+                  {(filePreview.file.size / 1024 / 1024).toFixed(2)} MB
+                  {filePreview.fileData && (
+                    <span className="ml-2 text-green-600">✓ Ready to send</span>
+                  )}
+                  {isUploading && (
+                    <span className="ml-2 text-blue-600">Uploading...</span>
+                  )}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={clearFilePreview}
+              className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-200"
+              title="Remove file"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="flex items-end space-x-3">
         <div className="flex-1 relative">
           <textarea
@@ -201,8 +296,10 @@ export default function MessageInput({
             value={message}
             onChange={handleTextareaChange}
             onKeyDown={handleKeyDown}
-            placeholder={getPlaceholderText()}
-            className={getTextareaClasses()}
+            placeholder={disabled ? "Connecting to SwiftTalk..." : "Type your message..."}
+            className={`w-full px-4 py-3 pr-12 border border-gray-300 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all ${
+              disabled ? "opacity-50 cursor-not-allowed bg-gray-50" : "bg-white"
+            }`}
             rows={1}
             style={{
               minHeight: "48px",
@@ -227,16 +324,14 @@ export default function MessageInput({
             onChange={handleFileUpload}
             className="hidden"
             accept="image/*,application/pdf,.txt,.doc,.docx"
-            disabled={disabled || isUploading}
+            disabled={fileButtonConfig.disabled}
           />
           <button
             type="button"
-            onClick={() =>
-              !disabled && !isUploading && fileInputRef.current?.click()
-            }
-            disabled={isUploading || disabled}
-            className={getFileButtonClasses()}
-            title={getFileButtonTitle()}
+            onClick={fileButtonConfig.onClick}
+            disabled={fileButtonConfig.disabled}
+            className={fileButtonConfig.classes}
+            title={fileButtonConfig.title}
           >
             {isUploading ? (
               <div className="animate-spin w-5 h-5 border-2 border-gray-400 border-t-transparent rounded-full" />
@@ -259,10 +354,11 @@ export default function MessageInput({
 
           {/* Send button */}
           <button
-            type="submit"
-            disabled={!message.trim() || disabled || isUploading}
-            className={getSendButtonClasses()}
-            title={getSendButtonTitle()}
+            type="button"
+            onClick={handleSendClick}
+            disabled={sendButtonConfig.disabled}
+            className={sendButtonConfig.classes}
+            title={sendButtonConfig.title}
           >
             <svg
               className="w-5 h-5"
