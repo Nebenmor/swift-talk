@@ -53,7 +53,7 @@ export class ChatService {
 
     // Add file data if it's a file message
     if (messageType === 'file' && fileData) {
-      // Convert relative URLs to absolute URLs
+      // CRITICAL FIX: Convert relative URLs to absolute URLs immediately
       messageData.fileUrl = this.getAbsoluteFileUrl(fileData.fileUrl);
       messageData.fileName = fileData.fileName;
       messageData.fileSize = fileData.fileSize;
@@ -197,19 +197,32 @@ export class ChatService {
     };
   }
 
-  // Other methods remain the same...
+  // ENHANCED: Mark messages as read with better error handling
   static async markMessagesAsRead(
     senderId: string,
     recipientId: string
   ): Promise<void> {
-    await Message.updateMany(
-      {
-        sender: senderId,
-        recipient: recipientId,
-        isRead: false
-      },
-      { isRead: true }
-    );
+    console.log('=== MARKING MESSAGES AS READ ===');
+    console.log(`Sender: ${senderId}, Recipient: ${recipientId}`);
+    
+    try {
+      const result = await Message.updateMany(
+        {
+          sender: senderId,
+          recipient: recipientId,
+          isRead: false
+        },
+        { 
+          isRead: true,
+          updatedAt: new Date()
+        }
+      );
+      
+      console.log(`Marked ${result.modifiedCount} messages as read`);
+    } catch (error) {
+      console.error('Error marking messages as read:', error);
+      throw error;
+    }
   }
 
   static async getUnreadMessagesCount(
@@ -253,7 +266,6 @@ export class ChatService {
     return user?.isOnline || false;
   }
 
-  // Add other missing methods...
   static async searchMessages(
     userId: string,
     query: string,
