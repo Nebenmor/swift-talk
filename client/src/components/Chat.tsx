@@ -22,6 +22,21 @@ interface ApiError {
   message?: string;
 }
 
+interface MessageSentData {
+  success: boolean;
+  tempId?: string;
+  messageId?: string;
+}
+
+interface MessageErrorData {
+  message: string;
+}
+
+interface MessageReadData {
+  readBy: string;
+  readAt: Date;
+}
+
 export default function Chat() {
   const [user, setUser] = useState<User | null>(null);
   const [friends, setFriends] = useState<Friend[]>([]);
@@ -50,6 +65,75 @@ export default function Chat() {
     selectedFriendRef.current = selectedFriend;
   }, [selectedFriend]);
 
+  // Pure utility functions (no dependencies needed)
+  const sortMessagesByTime = (messages: Message[]): Message[] => {
+    return messages.sort((a: Message, b: Message) => 
+      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    );
+  };
+
+  const removeDuplicateMessages = (messages: Message[]): Message[] => {
+    return messages.reduce((acc: Message[], msg: Message) => {
+      if (!acc.find((m) => m._id === msg._id)) {
+        acc.push(msg);
+      }
+      return acc;
+    }, []);
+  };
+
+  // Memoized helper functions
+  const updateMessageReadStatus = useCallback((userId: string, friendId: string) => {
+    setMessages(prevMessages => 
+      prevMessages.map(msg => {
+        const shouldMarkAsRead = msg.sender._id === userId && 
+          msg.recipient === friendId && 
+          !msg.isRead;
+        
+        if (shouldMarkAsRead) {
+          console.log('Marking message as read:', msg._id);
+          return { ...msg, isRead: true };
+        }
+        return msg;
+      })
+    );
+  }, []);
+
+  const autoMarkNewMessageAsRead = useCallback(async (senderId: string) => {
+    try {
+      await api.put(`/chat/messages/${senderId}/read`);
+      console.log('Auto-marked new message as read');
+      
+      socketService.emit('mark_messages_read', {
+        senderId: senderId
+      });
+    } catch (error) {
+      console.error('Failed to mark message as read:', error);
+    }
+  }, []);
+
+  const addNewMessageToChat = useCallback((message: Message) => {
+    setMessages(prevMessages => {
+      const messageExists = prevMessages.some(msg => msg._id === message._id);
+      if (messageExists) return prevMessages;
+      
+      const newMessages = [...prevMessages, message];
+      return sortMessagesByTime(newMessages);
+    });
+  }, []);
+
+  const showMessageNotifications = useCallback((message: Message) => {
+    NotificationService.showMessageNotification(
+      message.sender.username,
+      message.content,
+      message.messageType === 'file'
+    );
+    
+    toast.success(`New message from ${message.sender.username}`, {
+      icon: '💬',
+      duration: 3000,
+    });
+  }, []);
+
   // Load friends from API with debouncing
   const loadFriends = useCallback(async () => {
     if (loadingFriendsRef.current) return;
@@ -72,72 +156,64 @@ export default function Chat() {
     }
   }, []);
 
+  // Memoized helper functions that depend on loadFriends
+  const markMessagesAsReadMemo = useCallback(async (friendId: string) => {
+    try {
+      await api.put(`/chat/messages/${friendId}/read`);
+      console.log('Messages marked as read for friend:', friendId);
+      
+      setTimeout(() => {
+        if (!loadingFriendsRef.current) {
+          loadFriends();
+        }
+      }, 500);
+    } catch (error) {
+      console.error("Failed to mark messages as read:", error);
+    }
+  }, [loadFriends]);
+
+  const updateFriendsListMemo = useCallback(() => {
+    setTimeout(() => {
+      if (!loadingFriendsRef.current) {
+        loadFriends();
+      }
+    }, 1000);
+  }, [loadFriends]);
+
   // Load messages function
   const loadMessages = useCallback(async (friendId: string) => {
     try {
       const response = await api.get(`/chat/history/${friendId}`);
       if (response.data.success) {
-        // Remove duplicates and sort by creation time
-        const uniqueMessages =
-          response.data.data.data?.reduce((acc: Message[], msg: Message) => {
-            if (!acc.find((m) => m._id === msg._id)) {
-              acc.push(msg);
-            }
-            return acc;
-          }, []) || [];
-
-        // Sort messages by creation time (oldest first)
-        const sortedMessages = uniqueMessages.sort(
-          (a: Message, b: Message) =>
-            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-        );
-
+        const rawMessages = response.data.data.data || [];
+        const uniqueMessages = removeDuplicateMessages(rawMessages);
+        const sortedMessages = sortMessagesByTime(uniqueMessages);
+        
         setMessages(sortedMessages);
-
-        // Mark messages as read
-        await api.put(`/chat/messages/${friendId}/read`);
-        console.log('Messages marked as read for friend:', friendId);
-        
-        // Reload friends list to update unread counts
-        setTimeout(() => {
-          if (!loadingFriendsRef.current) {
-            loadFriends();
-          }
-        }, 500);
-        
+        await markMessagesAsReadMemo(friendId);
       }
     } catch (error) {
       console.error("Failed to load messages:", error);
       toast.error("Failed to load messages");
     }
-  }, [loadFriends]);
+  }, [markMessagesAsReadMemo]);
 
-  // NEW: Handle read receipts update
-  const handleMessagesRead = useCallback((data: { readBy: string; readAt: Date }) => {
+  // Handle read receipts update - Fixed TypeScript error
+  const handleMessagesRead = useCallback((data: unknown) => {
+    const readData = data as MessageReadData;
     const currentUser = currentUserRef.current;
     const currentSelectedFriend = selectedFriendRef.current;
     
     console.log('=== MESSAGES READ EVENT ===');
-    console.log('Read by:', data.readBy);
+    console.log('Read by:', readData.readBy);
     console.log('Current user:', currentUser?._id);
     console.log('Current selected friend:', currentSelectedFriend?._id);
     
-    // Only update if the read receipt is for messages with the currently selected friend
-    if (currentUser && currentSelectedFriend && data.readBy === currentSelectedFriend._id) {
+    if (currentUser && currentSelectedFriend && readData.readBy === currentSelectedFriend._id) {
       console.log('Updating read receipts for messages to:', currentSelectedFriend.username);
-      
-      // Update all unread messages from current user to selected friend as read
-      setMessages(prevMessages => 
-        prevMessages.map(msg => {
-          if (msg.sender._id === currentUser._id && msg.recipient === currentSelectedFriend._id && !msg.isRead) {
-            console.log('Marking message as read:', msg._id);
-            return { ...msg, isRead: true };
-          }
-          return msg;
-        })
-      );
+      updateMessageReadStatus(currentUser._id, currentSelectedFriend._id);
     }
-  }, []);
+  }, [updateMessageReadStatus]);
 
   // Message handler with better real-time updates
   const handleNewMessage = useCallback((data: unknown) => {
@@ -153,54 +229,16 @@ export default function Chat() {
     const isFromCurrentChatFriend = currentSelectedFriend && 
       message.sender._id === currentSelectedFriend._id;
 
-    // Update messages if from currently selected friend
     if (isForCurrentUser && isFromCurrentChatFriend) {
-      setMessages(prevMessages => {
-        const messageExists = prevMessages.some(msg => msg._id === message._id);
-        if (messageExists) return prevMessages;
-        
-        const newMessages = [...prevMessages, message];
-        return newMessages.sort((a: Message, b: Message) => 
-          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-        );
-      });
-
-      // Auto-mark as read since user is viewing the chat
-      setTimeout(async () => {
-        try {
-          await api.put(`/chat/messages/${message.sender._id}/read`);
-          console.log('Auto-marked new message as read');
-          
-          // Emit read receipt via socket
-          socketService.emit('mark_messages_read', {
-            senderId: message.sender._id
-          });
-        } catch (error) {
-          console.error('Failed to mark message as read:', error);
-        }
-      }, 500);
+      addNewMessageToChat(message);
+      setTimeout(() => autoMarkNewMessageAsRead(message.sender._id), 500);
     }
 
-    // Update friends list and show notifications for messages to current user
     if (isForCurrentUser) {
-      setTimeout(() => {
-        if (!loadingFriendsRef.current) {
-          loadFriends();
-        }
-      }, 1000);
-      
-      NotificationService.showMessageNotification(
-        message.sender.username,
-        message.content,
-        message.messageType === 'file'
-      );
-      
-      toast.success(`New message from ${message.sender.username}`, {
-        icon: '💬',
-        duration: 3000,
-      });
+      updateFriendsListMemo();
+      showMessageNotifications(message);
     }
-  }, [loadFriends]);
+  }, [addNewMessageToChat, updateFriendsListMemo, autoMarkNewMessageAsRead, showMessageNotifications]);
 
   // Friend status handler
   const handleFriendStatusUpdate = useCallback((data: unknown) => {
@@ -263,7 +301,7 @@ export default function Chat() {
     if (response.data.success) {
       const serverMessage = response.data.data;
       
-      // CRITICAL FIX: Convert relative URLs to absolute URLs for immediate display
+      // Convert relative URLs to absolute URLs for immediate display
       if (serverMessage.messageType === 'file' && serverMessage.fileUrl && !serverMessage.fileUrl.startsWith('http')) {
         serverMessage.fileUrl = `http://localhost:5000${serverMessage.fileUrl}`;
       }
@@ -274,6 +312,41 @@ export default function Chat() {
     }
   };
 
+  const createOptimisticMessage = (
+    tempId: string, 
+    content: string, 
+    messageType: 'text' | 'file',
+    fileData?: unknown
+  ): Message => {
+    if (!selectedFriend || !user) {
+      throw new Error('Missing required data for message creation');
+    }
+
+    let displayFileUrl = undefined;
+    if (messageType === 'file' && fileData) {
+      const fileInfo = fileData as { fileUrl: string };
+      displayFileUrl = fileInfo.fileUrl.startsWith('http') 
+        ? fileInfo.fileUrl 
+        : `http://localhost:5000${fileInfo.fileUrl}`;
+    }
+
+    return {
+      _id: tempId,
+      sender: {
+        _id: user._id,
+        username: user.username,
+        avatar: user.avatar,
+      },
+      recipient: selectedFriend._id,
+      content,
+      messageType,
+      fileUrl: displayFileUrl,
+      fileName: messageType === 'file' && fileData ? (fileData as { fileName: string }).fileName : undefined,
+      isRead: false,
+      createdAt: new Date(),
+    };
+  };
+
   // Message sending with improved file URL handling
   const handleSendMessage = async (content: string, messageType: 'text' | 'file' = 'text', fileData?: unknown) => {
     if (!selectedFriend || !user) return;
@@ -281,43 +354,15 @@ export default function Chat() {
     const tempId = `temp_${Date.now()}_${Math.random()}`;
     
     try {
-      // CRITICAL FIX: For file messages, ensure absolute URL for immediate display
-      let displayFileUrl = undefined;
-      if (messageType === 'file' && fileData) {
-        const fileInfo = fileData as { fileUrl: string };
-        displayFileUrl = fileInfo.fileUrl.startsWith('http') 
-          ? fileInfo.fileUrl 
-          : `http://localhost:5000${fileInfo.fileUrl}`;
-      }
+      const optimisticMessage = createOptimisticMessage(tempId, content, messageType, fileData);
 
-      // Create optimistic message with guaranteed string ID and proper file URL
-      const optimisticMessage: Message = {
-        _id: tempId,
-        sender: {
-          _id: user._id,
-          username: user.username,
-          avatar: user.avatar,
-        },
-        recipient: selectedFriend._id,
-        content,
-        messageType,
-        fileUrl: displayFileUrl,
-        fileName: messageType === 'file' && fileData ? (fileData as { fileName: string }).fileName : undefined,
-        isRead: false,
-        createdAt: new Date(),
-      };
-
-      // Add to UI immediately
       setMessages(prevMessages => {
         const newMessages = [...prevMessages, optimisticMessage];
-        return newMessages.sort((a: Message, b: Message) => 
-          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-        );
+        return sortMessagesByTime(newMessages);
       });
 
       sentMessagesRef.current.add(tempId);
 
-      // Send via appropriate method
       if (socketService.isConnected()) {
         await sendViaSocket(tempId, content, messageType, fileData);
       } else {
@@ -336,7 +381,6 @@ export default function Chat() {
   const handleFriendSelect = async (friend: Friend) => {
     setSelectedFriend(friend);
     
-    // Clear unread count immediately for better UX
     setFriends(prevFriends => 
       prevFriends.map(f => 
         f._id === friend._id ? { ...f, unreadCount: 0 } : f
@@ -346,7 +390,6 @@ export default function Chat() {
     await loadMessages(friend._id);
     setSidebarOpen(false);
 
-    // Emit read receipt for any unread messages from this friend
     setTimeout(() => {
       socketService.emit('mark_messages_read', {
         senderId: friend._id
@@ -354,86 +397,129 @@ export default function Chat() {
     }, 1000);
   };
 
+  // Socket event setup - Fixed to reduce nesting
+  const handleSocketConnect = useCallback(() => {
+    setSocketConnected(true);
+  }, []);
+
+  const handleSocketDisconnect = useCallback(() => {
+    setSocketConnected(false);
+  }, []);
+
+  const handleSocketConnectError = useCallback(() => {
+    setSocketConnected(false);
+  }, []);
+
+  const handleMessageSent = useCallback((data: MessageSentData) => {
+    if (!data.success || !data.tempId || !data.messageId) return;
+    
+    setMessages(prevMessages => 
+      prevMessages.map(msg => 
+        msg._id === data.tempId ? { ...msg, _id: data.messageId || msg._id } : msg
+      )
+    );
+    
+    if (data.tempId) {
+      sentMessagesRef.current.delete(data.tempId);
+    }
+  }, []);
+
+  const handleMessageError = useCallback((data: MessageErrorData) => {
+    toast.error(`Message failed: ${data.message}`);
+  }, []);
+
+  const setupSocketEvents = useCallback(() => {
+    socketService.on("connect", handleSocketConnect);
+    socketService.on("disconnect", handleSocketDisconnect);
+    socketService.on("connect_error", handleSocketConnectError);
+    socketService.on("new_message", handleNewMessage);
+    socketService.on("friend_status_update", handleFriendStatusUpdate);
+    socketService.on("messages_read", handleMessagesRead);
+
+    socketService.onMessageSent(handleMessageSent);
+    socketService.onMessageError(handleMessageError);
+  }, [
+    handleSocketConnect,
+    handleSocketDisconnect,
+    handleSocketConnectError,
+    handleNewMessage,
+    handleFriendStatusUpdate,
+    handleMessagesRead,
+    handleMessageSent,
+    handleMessageError
+  ]);
+
+  const cleanupSocketEvents = useCallback(() => {
+    socketService.off("connect", handleSocketConnect);
+    socketService.off("disconnect", handleSocketDisconnect);
+    socketService.off("connect_error", handleSocketConnectError);
+    socketService.off("new_message", handleNewMessage);
+    socketService.off("friend_status_update", handleFriendStatusUpdate);
+    socketService.off("messages_read", handleMessagesRead);
+    socketService.off("message_sent");
+    socketService.off("message_error");
+    socketService.disconnect();
+  }, [
+    handleSocketConnect,
+    handleSocketDisconnect,
+    handleSocketConnectError,
+    handleNewMessage,
+    handleFriendStatusUpdate,
+    handleMessagesRead
+  ]);
+
+  // Initialize the app - Extracted for better organization
+  const initializeUserAndPermissions = useCallback(async () => {
+    const currentUser = getUser();
+    if (!currentUser) {
+      navigate("/login");
+      return null;
+    }
+
+    setUser(currentUser);
+    await NotificationService.requestPermission();
+    return currentUser;
+  }, [navigate]);
+
+  const initializeSocketConnection = useCallback(async () => {
+    await socketService.connect();
+    setupSocketEvents();
+    setSocketConnected(socketService.isConnected());
+  }, [setupSocketEvents]);
+
+  const handleInitializationError = useCallback((error: unknown) => {
+    console.error("Failed to initialize SwiftTalk:", error);
+    toast.error("Failed to initialize SwiftTalk. Please refresh the page.");
+  }, []);
+
   // Initialize everything once
   useEffect(() => {
     if (initRef.current) return;
     initRef.current = true;
 
     const initializeApp = async () => {
-      const currentUser = getUser();
-      if (!currentUser) {
-        navigate("/login");
-        return;
-      }
-
-      setUser(currentUser);
-
       try {
-        await NotificationService.requestPermission();
+        const currentUser = await initializeUserAndPermissions();
+        if (!currentUser) return;
+
         await loadFriends();
-        await socketService.connect();
-
-        // Set up socket event listeners
-        socketService.on("connect", () => {
-          setSocketConnected(true);
-        });
-
-        socketService.on("disconnect", () => {
-          setSocketConnected(false);
-        });
-
-        socketService.on("connect_error", () => {
-          setSocketConnected(false);
-        });
-
-        socketService.on("new_message", handleNewMessage);
-        socketService.on("friend_status_update", handleFriendStatusUpdate);
-
-        // NEW: Listen for read receipts
-        socketService.on("messages_read", handleMessagesRead);
-
-        // Message sent handler with proper typing
-        socketService.onMessageSent((data) => {
-          if (data.success && data.tempId && data.messageId) {
-            setMessages(prevMessages => 
-              prevMessages.map(msg => 
-                msg._id === data.tempId ? { ...msg, _id: data.messageId || msg._id } : msg
-              )
-            );
-            
-            if (data.tempId) {
-              sentMessagesRef.current.delete(data.tempId);
-            }
-          }
-        });
-        
-        socketService.onMessageError((data) => {
-          toast.error(`Message failed: ${data.message}`);
-        });
-
-        setSocketConnected(socketService.isConnected());
+        await initializeSocketConnection();
       } catch (error) {
-        console.error("Failed to initialize SwiftTalk:", error);
-        toast.error("Failed to initialize SwiftTalk. Please refresh the page.");
+        handleInitializationError(error);
       } finally {
         setLoading(false);
       }
     };
 
     initializeApp();
-
-    return () => {
-      socketService.off("connect");
-      socketService.off("disconnect");
-      socketService.off("connect_error");
-      socketService.off("new_message");
-      socketService.off("friend_status_update");
-      socketService.off("messages_read");
-      socketService.off("message_sent");
-      socketService.off("message_error");
-      socketService.disconnect();
-    };
-  }, [navigate, loadFriends, handleNewMessage, handleFriendStatusUpdate, handleMessagesRead]);
+    return cleanupSocketEvents;
+  }, [
+    initializeUserAndPermissions,
+    loadFriends,
+    initializeSocketConnection,
+    handleInitializationError,
+    cleanupSocketEvents
+  ]);
 
   const handleLogout = () => {
     removeToken();
@@ -496,7 +582,7 @@ export default function Chat() {
 
   return (
     <div className="h-screen flex bg-gray-50 overflow-hidden">
-      {/* Mobile sidebar overlay - FIXED: Use proper button instead of div with role */}
+      {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <button
           className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden cursor-default"
