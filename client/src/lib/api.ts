@@ -1,11 +1,11 @@
-import axios from "axios";
+import axios, { AxiosError } from "axios";
 import { getToken, removeToken, removeUser } from "./auth";
 import toast from "react-hot-toast";
 
 // FIXED: Make sure this points to your backend port (5000)
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 
-console.log('API Base URL:', API_BASE_URL); // Debug log to verify
+console.log('API Base URL:', API_BASE_URL);
 
 const api = axios.create({
   baseURL: `${API_BASE_URL}/api`,
@@ -20,41 +20,28 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
     
-    // Debug log to verify the full URL - with null checks
     const fullUrl = (config.baseURL || '') + (config.url || '');
     console.log('Making request to:', fullUrl);
     
     return config;
   },
-  (error) => {
+  (error: Error) => {
     return Promise.reject(error);
   }
 );
 
-// Handle response errors
+// Handle response errors with proper typing
 api.interceptors.response.use(
   (response) => response,
-  (error: unknown) => {
-    // Improved error typing
-    const axiosError = error as {
-      message?: string;
-      response?: {
-        status?: number;
-        data?: unknown;
-      };
-      config?: {
-        url?: string;
-      };
-    };
-
+  (error: AxiosError) => {
     console.error('API Error:', {
-      message: axiosError.message,
-      status: axiosError.response?.status,
-      data: axiosError.response?.data,
-      url: axiosError.config?.url
+      message: error.message,
+      status: error.response?.status,
+      data: error.response?.data,
+      url: error.config?.url
     });
 
-    if (axiosError.response?.status === 401) {
+    if (error.response?.status === 401) {
       removeToken();
       removeUser();
       window.location.href = "/login";
