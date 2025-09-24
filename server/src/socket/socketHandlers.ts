@@ -18,24 +18,6 @@ class SocketManager {
     this.io.on('connection', (socket: Socket) => {
       console.log(`Socket connected: ${socket.id}`);
 
-      // Add debugging event listeners
-      socket.on('new_message', (data) => {
-        console.log('=== NEW MESSAGE EVENT RECEIVED ===');
-        console.log('Data:', data);
-        console.log('Socket connected:', socket.connected);
-        console.log('Socket ID:', socket.id);
-      });
-
-      socket.on('message_sent', (data) => {
-        console.log('=== MESSAGE SENT CONFIRMATION ===');
-        console.log('Data:', data);
-      });
-
-      socket.on('message_error', (data) => {
-        console.log('=== MESSAGE ERROR ===');
-        console.log('Error:', data);
-      });
-
       // Handle authentication
       socket.on('authenticate', async (token: string) => {
         try {
@@ -75,7 +57,7 @@ class SocketManager {
         this.handleTypingStop(socket, data);
       });
 
-      // Handle message read status
+      // ENHANCED: Handle message read status with real-time updates
       socket.on('mark_messages_read', async (data: { senderId: string }) => {
         try {
           await this.handleMarkMessagesRead(socket, data);
@@ -284,15 +266,33 @@ class SocketManager {
     const user = this.connectedUsers.get(socket.id);
     if (!user) return;
 
-    await ChatService.markMessagesAsRead(data.senderId, user.userId);
+    console.log('=== MARK MESSAGES READ ===');
+    console.log('User marking messages as read:', user.username, user.userId);
+    console.log('Messages from sender:', data.senderId);
 
-    // Notify sender that messages were read
-    const senderSocketId = this.userSockets.get(data.senderId);
-    if (senderSocketId) {
-      this.io.to(senderSocketId).emit('messages_read', {
-        readBy: user.userId,
-        readAt: new Date(),
-      });
+    try {
+      // Mark messages as read in database
+      await ChatService.markMessagesAsRead(data.senderId, user.userId);
+      
+      console.log('Messages marked as read in database');
+
+      // CRITICAL FIX: Send real-time read receipt to the message sender
+      const senderSocketId = this.userSockets.get(data.senderId);
+      if (senderSocketId) {
+        console.log(`Sending read receipt to sender: ${senderSocketId}`);
+        
+        this.io.to(senderSocketId).emit('messages_read', {
+          readBy: user.userId,
+          readByUsername: user.username,
+          readAt: new Date(),
+        });
+        
+        console.log('Read receipt sent successfully');
+      } else {
+        console.log(`Sender ${data.senderId} is not connected - cannot send read receipt`);
+      }
+    } catch (error) {
+      console.error('Error in handleMarkMessagesRead:', error);
     }
   }
 
