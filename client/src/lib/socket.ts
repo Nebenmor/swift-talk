@@ -32,6 +32,7 @@ class SocketService {
   private isAuthenticated = false;
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 3;
+  private connectionPromise: Promise<void> | null = null;
 
   public static getInstance(): SocketService {
     // Fix: Use nullish coalescing operator
@@ -48,20 +49,42 @@ class SocketService {
     const token = getToken();
     console.log("Token available:", !!token);
 
+    // If already connected and authenticated, return early
     if (this.socket && this.connected && this.isAuthenticated) {
       console.log("Socket already connected and authenticated");
       return;
+    }
+
+    // If connection is in progress, return the existing promise
+    if (this.connectionPromise) {
+      console.log("Connection already in progress, waiting...");
+      return this.connectionPromise;
     }
 
     if (!token) {
       throw new Error("No authentication token available");
     }
 
-    if (this.socket) {
+    // Only disconnect if we have a socket that's NOT working properly
+    if (this.socket && (!this.connected || !this.isAuthenticated)) {
+      console.log("Cleaning up failed socket connection");
       this.socket.removeAllListeners();
       this.socket.disconnect();
+      this.socket = null;
+      this.connected = false;
+      this.isAuthenticated = false;
     }
 
+    this.connectionPromise = this.createConnection(token);
+    
+    try {
+      await this.connectionPromise;
+    } finally {
+      this.connectionPromise = null;
+    }
+  }
+
+  private createConnection(token: string): Promise<void> {
     return new Promise((resolve, reject) => {
       console.log("Creating new socket connection...");
 
@@ -90,12 +113,16 @@ class SocketService {
 
       const onAuthError = (error: AuthErrorData) => {
         console.error("Socket authentication error:", error);
+        this.connected = false;
+        this.isAuthenticated = false;
         cleanup();
         reject(new Error("Authentication failed"));
       };
 
       const onConnectError = (error: Error) => {
         console.error("Socket connection error:", error);
+        this.connected = false;
+        this.isAuthenticated = false;
         cleanup();
         reject(error);
       };
@@ -149,6 +176,7 @@ class SocketService {
     this.connected = false;
     this.isAuthenticated = false;
     this.reconnectAttempts = 0;
+    this.connectionPromise = null;
 
     if (this.socket) {
       this.socket.removeAllListeners();
