@@ -25,7 +25,10 @@ class App {
     this.initializeErrorHandling();
   }
 
-  private initializeMiddlewares(): void {
+ private initializeMiddlewares(): void {
+    // Trust proxy for production (Render, Heroku, etc.)
+    this.app.set('trust proxy', true);
+
     // Security middleware
     this.app.use(
       helmet({
