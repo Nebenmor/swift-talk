@@ -55,6 +55,10 @@
     {
       "source": "/api/(.*)",
       "destination": "https://swift-talk-i1ov.onrender.com/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ],
   "redirects": [
