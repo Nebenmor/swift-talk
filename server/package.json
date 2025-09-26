@@ -5,17 +5,20 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "nodemon",
-    "build": "tsc",
+    "build": "tsc && npm run postbuild",
+    "postbuild": "mkdir -p dist/uploads && cp -r src/types dist/ 2>/dev/null || true",
     "start": "node dist/server.js",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "format": "prettier --write src/**/*.ts",
     "type-check": "tsc --noEmit",
     "clean": "rimraf dist",
+    "prebuild": "npm run clean",
     "setup-db": "node scripts/setup-database.js",
     "setup-db:test": "node scripts/setup-database.js --with-test-data",
     "test": "echo \"Tests coming soon...\"",
-    "prestart": "npm run build"
+    "prestart": "npm run build",
+    "health": "curl -f http://localhost:${PORT:-5000}/health || exit 1"
   },
   "keywords": [
     "chat",
@@ -25,7 +28,7 @@
     "typescript",
     "mongodb"
   ],
-  "author": "Your Name",
+  "author": "Anthony Nebenmor",
   "license": "MIT",
   "dependencies": {
     "bcryptjs": "^2.4.3",
