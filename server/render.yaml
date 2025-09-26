@@ -1,0 +1,50 @@
+services:
+  - type: web
+    name: swifttalk-backend
+    env: node
+    region: oregon # or your preferred region
+    plan: free # or your preferred plan
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: free # Set to true for auto-deploy on git push
+    
+    # Environment variables
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000 # Render uses port 10000 by default
+      - key: MONGODB_URI
+        fromDatabase:
+          name: mongodb-cluster
+          property: connectionString
+      - key: DB_NAME
+        value: chatapp
+      - key: JWT_SECRET
+        sync: false # Set this manually in Render dashboard for better control
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: MAX_FILE_SIZE
+        value: 5242880
+      - key: ALLOWED_FILE_TYPES
+        value: image/jpeg,image/png,image/gif,application/pdf,text/plain
+      - key: RATE_LIMIT_WINDOW_MS
+        value: 900000
+      - key: RATE_LIMIT_MAX_REQUESTS
+        value: 100
+      - key: CLIENT_URL
+        value: https://swifttalk-chat.vercel.app # Replace with your actual Vercel domain
+
+    # Build settings
+    buildFilter:
+      paths:
+        - server/**
+      ignoredPaths:
+        - client/**
+        - README.md
+
+# Optional: MongoDB database (if using Render's database service)
+# databases:
+#   - name: mongodb-cluster
+#     plan: starter # or your preferred plan
