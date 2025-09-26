@@ -44,6 +44,12 @@ class SocketService {
     console.log("Socket URL:", SOCKET_URL);
 
     const token = getToken();
+    console.log("🔑 Token check:", {
+      hasToken: !!token,
+      tokenLength: token?.length || 0,
+      tokenPrefix: token ? token.substring(0, 10) + "..." : "N/A"
+    });
+    
     if (!token) {
       throw new Error("No authentication token available");
     }
@@ -63,20 +69,20 @@ class SocketService {
 
       // RENDER FIX: Conservative configuration for Render deployment
       this.socket = io(SOCKET_URL, {
-        // CRITICAL: Start with polling, allow WebSocket upgrade only if stable
+        // CRITICAL: Start with polling, allow WebSocket upgrade
         transports: ["polling", "websocket"],
         
         // RENDER FIX: Allow upgrade with default timeout
         upgrade: true,
         
-        // RENDER FIX: Increased timeouts for Render's response times
-        timeout: 60000, // 60 seconds
+        // RENDER FIX: Much shorter timeout for faster debugging
+        timeout: 30000, // 30 seconds instead of 60
         
         // RENDER FIX: Connection settings optimized for cloud deployment
         reconnection: true,
-        reconnectionAttempts: 5,
-        reconnectionDelay: 2000,
-        reconnectionDelayMax: 10000,
+        reconnectionAttempts: 3, // Reduced for faster feedback
+        reconnectionDelay: 1000, // Faster reconnection
+        reconnectionDelayMax: 5000,
         randomizationFactor: 0.5,
         
         // RENDER FIX: Force new connection to avoid stale connections
@@ -85,16 +91,22 @@ class SocketService {
         // RENDER FIX: Query parameters for debugging
         query: {
           timestamp: Date.now(),
-          client: 'web'
+          client: 'web',
+          debug: true
         }
       });
 
       // Connection timeout handler
       const connectionTimeout = setTimeout(() => {
-        console.error("Socket connection timeout");
+        console.error("Socket connection timeout after 30 seconds");
+        console.log("Debug info:", {
+          socketState: this.socket?.connected,
+          transport: this.socket?.io?.engine?.transport?.name,
+          readyState: this.socket?.io?.engine?.readyState
+        });
         cleanup();
         reject(new Error("Connection timeout"));
-      }, 60000); // 60 seconds
+      }, 30000); // Match the socket timeout
 
       const cleanup = () => {
         clearTimeout(connectionTimeout);
