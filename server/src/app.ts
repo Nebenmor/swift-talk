@@ -234,6 +234,24 @@ class App {
           .json({ status: 'not ready', reason: 'database not connected' });
       }
     });
+
+    // FIXED: Add root endpoint for health checks and basic info
+    this.app.get('/', (req: Request, res: Response) => {
+      res.json({
+        name: 'SwiftTalk Server',
+        version: '1.0.0',
+        status: 'running',
+        environment: config.app.env,
+        timestamp: new Date().toISOString(),
+        socketIO: 'enabled',
+        endpoints: {
+          api: '/api',
+          health: '/health',
+          ready: '/ready',
+          socketIO: '/socket.io/',
+        },
+      });
+    });
   }
 
   private initializeRoutes(): void {
@@ -268,8 +286,13 @@ class App {
       ResponseUtil.notFound(res, `API endpoint ${req.originalUrl} not found`);
     });
 
-    // Catch all for undefined routes
+    // FIXED: Modified catch-all to exclude Socket.IO paths
     this.app.all('*', (req: Request, res: Response) => {
+      // Don't intercept Socket.IO requests
+      if (req.path.startsWith('/socket.io/')) {
+        return; // Let Socket.IO handle these requests
+      }
+
       ResponseUtil.notFound(
         res,
         `Route ${req.originalUrl} not found on SwiftTalk server`
