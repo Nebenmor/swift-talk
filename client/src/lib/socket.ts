@@ -65,48 +65,48 @@ class SocketService {
     }
 
     return new Promise((resolve, reject) => {
-      console.log("Creating socket connection with Render-optimized settings...");
+      console.log("Creating socket connection with simplified settings...");
 
-      // RENDER FIX: Conservative configuration for Render deployment
+      // SIMPLIFIED: Basic Socket.IO configuration
       this.socket = io(SOCKET_URL, {
-        // CRITICAL: Start with polling, allow WebSocket upgrade
-        transports: ["polling", "websocket"],
+        // Start with polling only, no WebSocket upgrade
+        transports: ["polling"],
         
-        // RENDER FIX: Allow upgrade with default timeout
-        upgrade: true,
+        // Disable upgrade to avoid complications
+        upgrade: false,
         
-        // RENDER FIX: Much shorter timeout for faster debugging
-        timeout: 30000, // 30 seconds instead of 60
+        // Basic timeouts
+        timeout: 20000, // 20 seconds
         
-        // RENDER FIX: Connection settings optimized for cloud deployment
+        // Simplified reconnection
         reconnection: true,
-        reconnectionAttempts: 3, // Reduced for faster feedback
-        reconnectionDelay: 1000, // Faster reconnection
-        reconnectionDelayMax: 5000,
-        randomizationFactor: 0.5,
+        reconnectionAttempts: 3,
+        reconnectionDelay: 1000,
         
-        // RENDER FIX: Force new connection to avoid stale connections
+        // Force new connection
         forceNew: true,
         
-        // RENDER FIX: Query parameters for debugging
+        // Simple query params
         query: {
-          timestamp: Date.now(),
-          client: 'web',
-          debug: true
+          timestamp: Date.now()
         }
       });
 
+      console.log("Socket.IO instance created, setting up event listeners...");
+
       // Connection timeout handler
       const connectionTimeout = setTimeout(() => {
-        console.error("Socket connection timeout after 30 seconds");
+        console.error("Socket connection timeout after 20 seconds");
         console.log("Debug info:", {
+          socketExists: !!this.socket,
           socketState: this.socket?.connected,
           transport: this.socket?.io?.engine?.transport?.name,
-          readyState: this.socket?.io?.engine?.readyState
+          readyState: this.socket?.io?.engine?.readyState,
+          url: SOCKET_URL
         });
         cleanup();
         reject(new Error("Connection timeout"));
-      }, 30000); // Match the socket timeout
+      }, 20000);
 
       const cleanup = () => {
         clearTimeout(connectionTimeout);
@@ -154,12 +154,9 @@ class SocketService {
         console.log("Socket connected:", this.socket?.connected);
         console.log("Reconnect attempts:", this.reconnectAttempts);
         
-        // Don't reject immediately, let reconnection logic handle it
-        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-          console.error("Max reconnection attempts reached, giving up");
-          cleanup();
-          reject(error);
-        }
+        // Reject immediately for debugging
+        cleanup();
+        reject(error);
       };
 
       // Event listeners
@@ -167,6 +164,11 @@ class SocketService {
       this.socket.once("authenticated", onAuthenticated);
       this.socket.once("auth_error", onAuthError);
       this.socket.on("connect_error", onConnectError);
+
+      // Add immediate connection debugging
+      this.socket.on("connecting", () => {
+        console.log("🔄 Socket attempting to connect...");
+      });
 
       // Enhanced disconnect handling
       this.socket.on("disconnect", (reason, description) => {
@@ -195,6 +197,8 @@ class SocketService {
       this.socket.on("connect", () => {
         console.log("Connected with transport:", this.socket?.io.engine?.transport?.name);
       });
+
+      console.log("Event listeners set up, connection should start automatically...");
     });
   }
 
