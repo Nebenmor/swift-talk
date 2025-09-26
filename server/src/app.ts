@@ -63,7 +63,7 @@ class App {
 
     // Production-optimized CORS configuration
     const allowedOrigins = config.app.env === 'production' 
-      ? [config.app.clientUrl, 'https://your-vercel-domain.vercel.app'] // Replace with your actual Vercel domain
+      ? [config.app.clientUrl, 'https://swifttalk-chat.vercel.app']
       : [config.app.clientUrl, 'http://localhost:3000'];
 
     this.app.use(
