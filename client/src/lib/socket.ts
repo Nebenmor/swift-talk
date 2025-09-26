@@ -1,12 +1,11 @@
+// socket.ts - Frontend configuration for Render deployment
 import { io, Socket } from "socket.io-client";
 import { getToken } from "./auth";
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
 
-// Proper function type instead of interface
 type SocketEventCallback = (data: unknown) => void;
 
-// Specific event types for better type safety
 interface MessageSentData {
   success: boolean;
   messageId?: string;
@@ -31,10 +30,9 @@ class SocketService {
   private connected = false;
   private isAuthenticated = false;
   private reconnectAttempts = 0;
-  private readonly maxReconnectAttempts = 3;
+  private readonly maxReconnectAttempts = 5; // Increased for production
 
   public static getInstance(): SocketService {
-    // Fix: Use nullish coalescing operator
     SocketService.instance ??= new SocketService();
     return SocketService.instance;
   }
@@ -46,15 +44,13 @@ class SocketService {
     console.log("Socket URL:", SOCKET_URL);
 
     const token = getToken();
-    console.log("Token available:", !!token);
+    if (!token) {
+      throw new Error("No authentication token available");
+    }
 
     if (this.socket && this.connected && this.isAuthenticated) {
       console.log("Socket already connected and authenticated");
       return;
-    }
-
-    if (!token) {
-      throw new Error("No authentication token available");
     }
 
     if (this.socket) {
@@ -63,44 +59,45 @@ class SocketService {
     }
 
     return new Promise((resolve, reject) => {
-      console.log("Creating new socket connection...");
+      console.log("Creating socket connection with Render-optimized settings...");
 
+      // RENDER FIX: Conservative configuration for Render deployment
       this.socket = io(SOCKET_URL, {
-        transports: ["websocket", "polling"],
-        timeout: 15000,
-        reconnection: false,
-        autoConnect: true,
+        // CRITICAL: Start with polling, allow WebSocket upgrade only if stable
+        transports: ["polling", "websocket"],
+        
+        // RENDER FIX: Allow upgrade with default timeout
+        upgrade: true,
+        
+        // RENDER FIX: Increased timeouts for Render's response times
+        timeout: 60000, // 60 seconds
+        
+        // RENDER FIX: Connection settings optimized for cloud deployment
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 2000,
+        reconnectionDelayMax: 10000,
+        randomizationFactor: 0.5,
+        
+        // RENDER FIX: Force new connection to avoid stale connections
+        forceNew: true,
+        
+        // RENDER FIX: Query parameters for debugging
+        query: {
+          timestamp: Date.now(),
+          client: 'web'
+        }
       });
 
-      const onConnect = () => {
-        console.log("Socket connected, authenticating...");
-        this.connected = true;
-        if (this.socket) {
-          this.socket.emit("authenticate", token);
-        }
-      };
-
-      const onAuthenticated = (data: AuthenticatedData) => {
-        console.log("Socket authenticated successfully:", data.user?.username);
-        this.isAuthenticated = true;
-        this.reconnectAttempts = 0;
+      // Connection timeout handler
+      const connectionTimeout = setTimeout(() => {
+        console.error("Socket connection timeout");
         cleanup();
-        resolve();
-      };
-
-      const onAuthError = (error: AuthErrorData) => {
-        console.error("Socket authentication error:", error);
-        cleanup();
-        reject(new Error("Authentication failed"));
-      };
-
-      const onConnectError = (error: Error) => {
-        console.error("Socket connection error:", error);
-        cleanup();
-        reject(error);
-      };
+        reject(new Error("Connection timeout"));
+      }, 60000); // 60 seconds
 
       const cleanup = () => {
+        clearTimeout(connectionTimeout);
         if (this.socket) {
           this.socket.off("connect", onConnect);
           this.socket.off("authenticated", onAuthenticated);
@@ -109,19 +106,62 @@ class SocketService {
         }
       };
 
+      const onConnect = () => {
+        console.log("Socket connected successfully, authenticating...");
+        this.connected = true;
+        if (this.socket) {
+          this.socket.emit("authenticate", token);
+        }
+      };
+
+      const onAuthenticated = (data: AuthenticatedData) => {
+        console.log("Socket authenticated:", data.user?.username);
+        this.isAuthenticated = true;
+        this.reconnectAttempts = 0;
+        cleanup();
+        resolve();
+      };
+
+      const onAuthError = (error: AuthErrorData) => {
+        console.error("Authentication error:", error);
+        cleanup();
+        reject(new Error("Authentication failed"));
+      };
+
+      const onConnectError = (error: Error) => {
+        console.error("Connection error:", error);
+        console.log("Transport:", this.socket?.io.engine?.transport?.name);
+        console.log("Attempting reconnection...");
+        
+        // Don't reject immediately, let reconnection logic handle it
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+          cleanup();
+          reject(error);
+        }
+      };
+
+      // Event listeners
       this.socket.once("connect", onConnect);
       this.socket.once("authenticated", onAuthenticated);
       this.socket.once("auth_error", onAuthError);
-      this.socket.once("connect_error", onConnectError);
+      this.socket.on("connect_error", onConnectError);
 
+      // Enhanced disconnect handling
       this.socket.on("disconnect", (reason) => {
         console.log("Socket disconnected:", reason);
         this.connected = false;
         this.isAuthenticated = false;
 
+        // Auto-reconnect for certain disconnect reasons
         if (reason === "io server disconnect" || reason === "transport close") {
+          console.log("Server initiated disconnect, attempting reconnection...");
           this.attemptReconnection();
         }
+      });
+
+      // Transport logging
+      this.socket.on("connect", () => {
+        console.log("Connected with transport:", this.socket?.io.engine?.transport?.name);
       });
     });
   }
@@ -135,7 +175,7 @@ class SocketService {
     this.reconnectAttempts++;
     const delay = Math.min(2000 * this.reconnectAttempts, 10000);
 
-    console.log(`Attempting reconnection ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`);
+    console.log(`Reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`);
 
     setTimeout(() => {
       this.connect().catch((error) => {
@@ -145,7 +185,7 @@ class SocketService {
   }
 
   disconnect(): void {
-    console.log("Manually disconnecting socket");
+    console.log("Disconnecting socket");
     this.connected = false;
     this.isAuthenticated = false;
     this.reconnectAttempts = 0;
@@ -158,12 +198,6 @@ class SocketService {
   }
 
   emit(event: string, data: unknown): void {
-    console.log("=== EMITTING EVENT ===");
-    console.log("Event:", event);
-    console.log("Data:", data);
-    console.log("Socket connected:", this.connected);
-    console.log("Socket authenticated:", this.isAuthenticated);
-
     if (this.socket && this.connected && this.isAuthenticated) {
       console.log(`Emitting ${event}:`, data);
       this.socket.emit(event, data);
@@ -175,8 +209,6 @@ class SocketService {
   on(event: string, callback: SocketEventCallback): void {
     if (this.socket) {
       this.socket.on(event, callback);
-    } else {
-      console.warn(`Cannot listen to ${event}: Socket not initialized`);
     }
   }
 
@@ -190,7 +222,6 @@ class SocketService {
     }
   }
 
-  // Typed event handler methods
   onMessageSent(callback: (data: MessageSentData) => void): void {
     this.on('message_sent', callback as SocketEventCallback);
   }
@@ -208,6 +239,7 @@ class SocketService {
       connected: this.connected,
       authenticated: this.isAuthenticated,
       reconnectAttempts: this.reconnectAttempts,
+      transport: this.socket?.io.engine?.transport?.name || 'none'
     };
   }
 }

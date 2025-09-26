@@ -58,13 +58,16 @@ const io = new SocketIOServer(httpServer, {
     },
     methods: ['GET', 'POST'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   },
   
-  // FIXED: Transport configuration optimized for Render
+  // FIXED: Transport configuration optimized for Render with outbound IPs
   transports: config.app.env === 'production' 
-    ? ['polling', 'websocket'] // Start with polling in production, then upgrade
+    ? ['polling', 'websocket'] // Allow both, start with polling
     : ['websocket', 'polling'], // WebSocket first in development
+  
+  // FIXED: Allow upgrades but with conservative timeouts
+  allowUpgrades: true,
   
   // FIXED: Connection settings optimized for cloud deployment
   pingTimeout: 60000, // 60 seconds
