@@ -34,7 +34,7 @@ services:
       - key: RATE_LIMIT_MAX_REQUESTS
         value: 100
       - key: CLIENT_URL
-        value: https://swifttalk-chat.vercel.app # Replace with your actual Vercel domain
+        value: https://swifttalk-chat.vercel.app
 
     # Build settings
     buildFilter:
@@ -44,7 +44,3 @@ services:
         - client/**
         - README.md
 
-# Optional: MongoDB database (if using Render's database service)
-# databases:
-#   - name: mongodb-cluster
-#     plan: starter # or your preferred plan

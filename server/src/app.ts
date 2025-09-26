@@ -45,38 +45,68 @@ class App {
             defaultSrc: ["'self'"],
             styleSrc: ["'self'", "'unsafe-inline'"],
             scriptSrc: ["'self'"],
-            imgSrc: ["'self'", "data:", "https:"],
-            connectSrc: ["'self'", "ws:", "wss:"],
+            imgSrc: ["'self'", 'data:', 'https:'],
+            connectSrc: ["'self'", 'ws:', 'wss:'],
             fontSrc: ["'self'"],
             objectSrc: ["'none'"],
             mediaSrc: ["'self'"],
             frameSrc: ["'none'"],
           },
         },
-        hsts: config.app.env === 'production' ? {
-          maxAge: 31536000,
-          includeSubDomains: true,
-          preload: true
-        } : false,
+        hsts:
+          config.app.env === 'production'
+            ? {
+                maxAge: 31536000,
+                includeSubDomains: true,
+                preload: true,
+              }
+            : false,
       })
     );
 
     // Production-optimized CORS configuration
-    const allowedOrigins = config.app.env === 'production' 
-      ? [config.app.clientUrl, 'https://swifttalk-chat.vercel.app']
-      : [config.app.clientUrl, 'http://localhost:3000'];
+    const allowedOrigins = [
+      config.app.clientUrl, // From environment variable
+      'https://swifttalk-chat.vercel.app', // Your production frontend
+      'http://localhost:3000', // Local development
+      'http://localhost:5173', // Vite dev server
+      'https://swift-talk-i1ov.onrender.com', // Your backend domain (for testing)
+    ];
 
     this.app.use(
       cors({
         origin: (origin, callback) => {
-          // Allow requests with no origin (mobile apps, etc.)
-          if (!origin) return callback(null, true);
-          
-          if (allowedOrigins.includes(origin)) {
+          console.log('HTTP CORS check for origin:', origin);
+
+          // Allow requests with no origin (mobile apps, Postman, etc.)
+          if (!origin) {
+            console.log('No origin - allowing request');
             return callback(null, true);
           }
-          
-          console.warn(`CORS blocked origin: ${origin}`);
+
+          // Check exact matches
+          if (allowedOrigins.includes(origin)) {
+            console.log('Origin allowed:', origin);
+            return callback(null, true);
+          }
+
+          // Check regex patterns for Vercel preview deployments
+          const regexPatterns = [
+            /^https:\/\/.*\.vercel\.app$/,
+            /^https:\/\/.*\.onrender\.com$/,
+          ];
+
+          const isRegexMatch = regexPatterns.some((pattern) =>
+            pattern.test(origin)
+          );
+
+          if (isRegexMatch) {
+            console.log('Origin allowed by regex:', origin);
+            return callback(null, true);
+          }
+
+          console.warn(`HTTP CORS blocked origin: ${origin}`);
+          console.log('Allowed origins:', allowedOrigins);
           return callback(new Error('Not allowed by CORS'));
         },
         credentials: true,
@@ -88,18 +118,20 @@ class App {
     );
 
     // Proper compression middleware
-    this.app.use(compression({
-      filter: (req: Request, res: Response) => {
-        // Don't compress responses if this request explicitly asks for no compression
-        if (req.headers['x-no-compression']) {
-          return false;
-        }
-        // Use compression filter function
-        return compression.filter(req, res);
-      },
-      threshold: 1024, // Only compress responses larger than 1KB
-      level: 6, // Compression level (1-9, 6 is default)
-    }));
+    this.app.use(
+      compression({
+        filter: (req: Request, res: Response) => {
+          // Don't compress responses if this request explicitly asks for no compression
+          if (req.headers['x-no-compression']) {
+            return false;
+          }
+          // Use compression filter function
+          return compression.filter(req, res);
+        },
+        threshold: 1024, // Only compress responses larger than 1KB
+        level: 6, // Compression level (1-9, 6 is default)
+      })
+    );
 
     // Production logging
     if (config.app.env === 'production') {
@@ -110,7 +142,8 @@ class App {
 
     // Production-optimized rate limiting
     const generalLimiter = rateLimit({
-      windowMs: config.app.env === 'production' ? 15 * 60 * 1000 : 1 * 60 * 1000, // 15 min in prod, 1 min in dev
+      windowMs:
+        config.app.env === 'production' ? 15 * 60 * 1000 : 1 * 60 * 1000, // 15 min in prod, 1 min in dev
       max: config.app.env === 'production' ? 500 : 200, // Higher limit for production
       message: {
         success: false,
@@ -141,17 +174,21 @@ class App {
     this.app.use('/api/auth/register', authLimiter);
 
     // Body parsing middleware with size limits
-    this.app.use(express.json({ 
-      limit: '10mb',
-      verify: (req, res, buf) => {
-        // Add request body validation if needed
-      }
-    }));
-    this.app.use(express.urlencoded({ 
-      extended: true, 
-      limit: '10mb',
-      parameterLimit: 1000
-    }));
+    this.app.use(
+      express.json({
+        limit: '10mb',
+        verify: (req, res, buf) => {
+          // Add request body validation if needed
+        },
+      })
+    );
+    this.app.use(
+      express.urlencoded({
+        extended: true,
+        limit: '10mb',
+        parameterLimit: 1000,
+      })
+    );
 
     // Static files middleware with caching
     this.app.use(
@@ -164,7 +201,7 @@ class App {
           // Set security headers for uploaded files
           res.setHeader('X-Content-Type-Options', 'nosniff');
           res.setHeader('X-Frame-Options', 'DENY');
-        }
+        },
       })
     );
 
@@ -192,7 +229,9 @@ class App {
       if (database.getConnectionStatus()) {
         res.status(200).json({ status: 'ready' });
       } else {
-        res.status(503).json({ status: 'not ready', reason: 'database not connected' });
+        res
+          .status(503)
+          .json({ status: 'not ready', reason: 'database not connected' });
       }
     });
   }
@@ -219,8 +258,8 @@ class App {
           users: '/api/users',
           chat: '/api/chat',
           health: '/health',
-          docs: '/api/docs' // If you add API docs later
-        }
+          docs: '/api/docs', // If you add API docs later
+        },
       });
     });
 
@@ -231,7 +270,10 @@ class App {
 
     // Catch all for undefined routes
     this.app.all('*', (req: Request, res: Response) => {
-      ResponseUtil.notFound(res, `Route ${req.originalUrl} not found on SwiftTalk server`);
+      ResponseUtil.notFound(
+        res,
+        `Route ${req.originalUrl} not found on SwiftTalk server`
+      );
     });
   }
 
@@ -293,9 +335,10 @@ class App {
 
         // Default error response
         const statusCode = (error as any).statusCode || 500;
-        const message = config.app.env === 'production'
-          ? 'Internal server error'
-          : error.message;
+        const message =
+          config.app.env === 'production'
+            ? 'Internal server error'
+            : error.message;
 
         ResponseUtil.error(res, message, statusCode);
       }
@@ -322,7 +365,9 @@ class App {
   public async start(): Promise<void> {
     try {
       await database.connect();
-      console.log(`✅ SwiftTalk connected to MongoDB in ${config.app.env} mode`);
+      console.log(
+        `✅ SwiftTalk connected to MongoDB in ${config.app.env} mode`
+      );
     } catch (error) {
       console.error('Failed to connect to database:', error);
       throw error;
