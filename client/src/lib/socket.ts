@@ -107,15 +107,20 @@ class SocketService {
       };
 
       const onConnect = () => {
-        console.log("Socket connected successfully, authenticating...");
+        console.log("✅ Socket connected successfully, authenticating...");
+        console.log("Socket ID:", this.socket?.id);
+        console.log("Transport used:", this.socket?.io.engine?.transport?.name);
         this.connected = true;
         if (this.socket) {
+          console.log("🔐 Sending authentication token...");
           this.socket.emit("authenticate", token);
         }
       };
 
       const onAuthenticated = (data: AuthenticatedData) => {
-        console.log("Socket authenticated:", data.user?.username);
+        console.log("✅ Socket authenticated successfully!");
+        console.log("User data:", data.user?.username);
+        console.log("Socket ID:", this.socket?.id);
         this.isAuthenticated = true;
         this.reconnectAttempts = 0;
         cleanup();
@@ -123,18 +128,23 @@ class SocketService {
       };
 
       const onAuthError = (error: AuthErrorData) => {
-        console.error("Authentication error:", error);
+        console.error("❌ Authentication error:", error);
+        console.log("Token being used:", token ? "Present" : "Missing");
+        console.log("Socket ID:", this.socket?.id);
         cleanup();
-        reject(new Error("Authentication failed"));
+        reject(new Error(`Authentication failed: ${error.message}`));
       };
 
       const onConnectError = (error: Error) => {
-        console.error("Connection error:", error);
-        console.log("Transport:", this.socket?.io.engine?.transport?.name);
-        console.log("Attempting reconnection...");
+        console.error("❌ Connection error:", error.message);
+        console.log("Error details:", error);
+        console.log("Socket transport:", this.socket?.io.engine?.transport?.name);
+        console.log("Socket connected:", this.socket?.connected);
+        console.log("Reconnect attempts:", this.reconnectAttempts);
         
         // Don't reject immediately, let reconnection logic handle it
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+          console.error("Max reconnection attempts reached, giving up");
           cleanup();
           reject(error);
         }
@@ -147,15 +157,25 @@ class SocketService {
       this.socket.on("connect_error", onConnectError);
 
       // Enhanced disconnect handling
-      this.socket.on("disconnect", (reason) => {
-        console.log("Socket disconnected:", reason);
+      this.socket.on("disconnect", (reason, description) => {
+        console.warn("🔌 Socket disconnected!");
+        console.log("Disconnect reason:", reason);
+        console.log("Disconnect description:", description);
+        console.log("Was authenticated:", this.isAuthenticated);
+        console.log("Socket ID:", this.socket?.id);
+        
         this.connected = false;
         this.isAuthenticated = false;
 
         // Auto-reconnect for certain disconnect reasons
         if (reason === "io server disconnect" || reason === "transport close") {
-          console.log("Server initiated disconnect, attempting reconnection...");
+          console.log("🔄 Server initiated disconnect, attempting reconnection...");
           this.attemptReconnection();
+        } else if (reason === "ping timeout" || reason === "transport error") {
+          console.log("🔄 Connection issue detected, attempting reconnection...");
+          this.attemptReconnection();
+        } else {
+          console.log(`ℹ️  Disconnect reason '${reason}' - no automatic reconnection`);
         }
       });
 
