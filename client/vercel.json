@@ -11,6 +11,12 @@
       }
     }
   ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
@@ -50,34 +56,5 @@
         }
       ]
     }
-  ],
-  "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "https://swift-talk-i1ov.onrender.com/api/$1"
-    },
-    {
-      "source": "/((?!api).*)",
-      "destination": "/index.html"
-    }
-  ],
-  "redirects": [
-    {
-      "source": "/home",
-      "destination": "/",
-      "permanent": true
-    }
-  ],
-  "env": {
-    "VITE_API_BASE_URL": "https://swift-talk-i1ov.onrender.com",
-    "VITE_SOCKET_URL": "https://swift-talk-i1ov.onrender.com"
-  },
-  "build": {
-    "env": {
-      "VITE_API_BASE_URL": "https://swift-talk-i1ov.onrender.com",
-      "VITE_SOCKET_URL": "https://swift-talk-i1ov.onrender.com"
-    }
-  },
-  "trailingSlash": false,
-  "cleanUrls": true
+  ]
 }
