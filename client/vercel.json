@@ -98,11 +98,6 @@
       "VITE_SOCKET_URL": "https://swift-talk-i1ov.onrender.com"
     }
   },
-  "functions": {
-    "app/**/*.js": {
-      "runtime": "@vercel/node"
-    }
-  },
   "trailingSlash": false,
   "cleanUrls": true
 }
