@@ -75,36 +75,12 @@ class SocketService {
         return;
       }
 
-      // SIMPLIFIED: Basic Socket.IO configuration with explicit CORS handling
+      // MINIMAL: Match working local configuration exactly
       try {
         this.socket = io(SOCKET_URL, {
-          // Start with polling only, no WebSocket upgrade
           transports: ["polling"],
-          
-          // Disable upgrade to avoid complications
-          upgrade: false,
-          
-          // Explicit autoConnect
-          autoConnect: true,
-          
-          // Basic timeouts
-          timeout: 20000, // 20 seconds
-          
-          // Simplified reconnection
-          reconnection: true,
-          reconnectionAttempts: 3,
-          reconnectionDelay: 1000,
-          
-          // Force new connection
           forceNew: true,
-          
-          // Explicit CORS handling
-          withCredentials: true,
-          
-          // Simple query params
-          query: {
-            timestamp: Date.now()
-          }
+          timeout: 10000
         });
         
         console.log("Socket.IO instance created successfully:", !!this.socket);
