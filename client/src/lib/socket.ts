@@ -104,7 +104,7 @@ class SocketService {
         console.log("Socket.IO instance created successfully:", !!this.socket);
       } catch (error) {
         console.error("Failed to create Socket.IO instance:", error);
-        reject(error);
+        reject(error instanceof Error ? error : new Error(String(error)));
         return;
       }
 
@@ -118,14 +118,10 @@ class SocketService {
           socketState: this.socket?.connected,
           transport: this.socket?.io?.engine?.transport?.name,
           readyState: this.socket?.io?.engine?.readyState,
-          url: SOCKET_URL
+          url: SOCKET_URL,
+          socketId: this.socket?.id,
+          connecting: !this.socket?.connected && !this.socket?.disconnected
         });
-        
-        // Force cleanup and disconnect
-        if (this.socket) {
-          this.socket.disconnect();
-          this.socket = null;
-        }
         
         cleanup();
         reject(new Error("Connection timeout"));
@@ -189,12 +185,16 @@ class SocketService {
       this.socket.once("auth_error", onAuthError);
       this.socket.on("connect_error", onConnectError);
 
-      // Add immediate connection debugging
+      // Add comprehensive event debugging
       this.socket.on("connecting", () => {
         console.log("🔄 Socket attempting to connect...");
       });
 
-      // Enhanced disconnect handling
+      this.socket.on("connect", () => {
+        console.log("🔗 Socket connected event fired");
+        console.log("Connected with transport:", this.socket?.io.engine?.transport?.name);
+      });
+
       this.socket.on("disconnect", (reason, description) => {
         console.warn("🔌 Socket disconnected!");
         console.log("Disconnect reason:", reason);
@@ -217,12 +217,24 @@ class SocketService {
         }
       });
 
-      // Transport logging
-      this.socket.on("connect", () => {
-        console.log("Connected with transport:", this.socket?.io.engine?.transport?.name);
+      // Add more debugging events
+      this.socket.on("connect_error", (error) => {
+        console.error("🔴 connect_error event:", error);
+      });
+
+      this.socket.on("error", (error) => {
+        console.error("🔴 error event:", error);
       });
 
       console.log("Event listeners set up, connection should start automatically...");
+      
+      // Force connection attempt if not already connecting
+      setTimeout(() => {
+        if (this.socket && !this.socket.connected) {
+          console.log("⚠️ Socket not connecting automatically, forcing connection...");
+          this.socket.connect();
+        }
+      }, 1000);
     });
   }
 
