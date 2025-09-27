@@ -59,7 +59,15 @@ class SocketService {
       return;
     }
 
+    // Don't disconnect existing socket if we're just checking connection
+    if (this.socket && this.socket.connected) {
+      console.log("Socket exists and is connected, skipping reconnection");
+      return;
+    }
+
+    // Only disconnect if we're creating a new connection
     if (this.socket) {
+      console.log("Cleaning up previous socket instance");
       this.socket.removeAllListeners();
       this.socket.disconnect();
     }
