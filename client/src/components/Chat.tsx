@@ -492,7 +492,7 @@ export default function Chat() {
     toast.error("Failed to initialize SwiftTalk. Please refresh the page.");
   }, []);
 
-  // Initialize everything once
+  // Initialize everything once - FIXED VERSION
   useEffect(() => {
     if (initRef.current) return;
     initRef.current = true;
@@ -512,14 +512,27 @@ export default function Chat() {
     };
 
     initializeApp();
-    return cleanupSocketEvents;
-  }, [
-    initializeUserAndPermissions,
-    loadFriends,
-    initializeSocketConnection,
-    handleInitializationError,
-    cleanupSocketEvents
-  ]);
+    
+    // CRITICAL FIX: Only return cleanup on component unmount, not on every render
+    return () => {
+      console.log("Chat component unmounting - cleaning up socket");
+      cleanupSocketEvents();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // FIXED: Empty dependency array to run only once
+
+  // Separate useEffect for handling component unmount cleanup
+  useEffect(() => {
+    // This runs when component unmounts or when user logs out
+    return () => {
+      if (socketService.isConnected()) {
+        console.log("Component cleanup - disconnecting socket");
+        socketService.disconnect();
+      }
+    };
+  }, []);
+
+
 
   const handleLogout = () => {
     removeToken();
