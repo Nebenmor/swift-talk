@@ -66,31 +66,47 @@ class SocketService {
 
     return new Promise((resolve, reject) => {
       console.log("Creating socket connection with simplified settings...");
+      console.log("Socket URL being used:", SOCKET_URL);
+      
+      // Test if Socket.IO library is available
+      if (typeof io === 'undefined') {
+        console.error("Socket.IO library is not available!");
+        reject(new Error("Socket.IO library not loaded"));
+        return;
+      }
 
       // SIMPLIFIED: Basic Socket.IO configuration
-      this.socket = io(SOCKET_URL, {
-        // Start with polling only, no WebSocket upgrade
-        transports: ["polling"],
+      try {
+        this.socket = io(SOCKET_URL, {
+          // Start with polling only, no WebSocket upgrade
+          transports: ["polling"],
+          
+          // Disable upgrade to avoid complications
+          upgrade: false,
+          
+          // Basic timeouts
+          timeout: 20000, // 20 seconds
+          
+          // Simplified reconnection
+          reconnection: true,
+          reconnectionAttempts: 3,
+          reconnectionDelay: 1000,
+          
+          // Force new connection
+          forceNew: true,
+          
+          // Simple query params
+          query: {
+            timestamp: Date.now()
+          }
+        });
         
-        // Disable upgrade to avoid complications
-        upgrade: false,
-        
-        // Basic timeouts
-        timeout: 20000, // 20 seconds
-        
-        // Simplified reconnection
-        reconnection: true,
-        reconnectionAttempts: 3,
-        reconnectionDelay: 1000,
-        
-        // Force new connection
-        forceNew: true,
-        
-        // Simple query params
-        query: {
-          timestamp: Date.now()
-        }
-      });
+        console.log("Socket.IO instance created successfully:", !!this.socket);
+      } catch (error) {
+        console.error("Failed to create Socket.IO instance:", error);
+        reject(error);
+        return;
+      }
 
       console.log("Socket.IO instance created, setting up event listeners...");
 
@@ -104,6 +120,13 @@ class SocketService {
           readyState: this.socket?.io?.engine?.readyState,
           url: SOCKET_URL
         });
+        
+        // Force cleanup and disconnect
+        if (this.socket) {
+          this.socket.disconnect();
+          this.socket = null;
+        }
+        
         cleanup();
         reject(new Error("Connection timeout"));
       }, 20000);
@@ -144,7 +167,8 @@ class SocketService {
         console.log("Token being used:", token ? "Present" : "Missing");
         console.log("Socket ID:", this.socket?.id);
         cleanup();
-        reject(new Error(`Authentication failed: ${error.message}`));
+        const errorMessage = error.message || "Authentication failed";
+        reject(new Error(`Authentication failed: ${errorMessage}`));
       };
 
       const onConnectError = (error: Error) => {
