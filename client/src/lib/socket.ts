@@ -115,12 +115,11 @@ class SocketService {
         console.error("Socket connection timeout after 10 seconds");
         console.log("Debug info:", {
           socketExists: !!this.socket,
-          socketState: this.socket?.connected,
-          transport: this.socket?.io?.engine?.transport?.name,
-          readyState: this.socket?.io?.engine?.readyState,
+          socketState: this.connected,
+          transport: this.socket?.io.engine?.transport?.name,
+          readyState: this.socket?.io.engine?.readyState,
           url: SOCKET_URL,
-          socketId: this.socket?.id,
-          engineConnected: this.socket?.io?.engine?.connected
+          socketId: this.socket?.id
         });
         
         cleanup();
@@ -144,7 +143,6 @@ class SocketService {
         console.log("Socket connected successfully!");
         console.log("Socket ID:", this.socket?.id);
         console.log("Transport used:", this.socket?.io.engine?.transport?.name);
-        console.log("Engine connected:", this.socket?.io.engine?.connected);
         this.connected = true;
         
         if (this.socket) {
