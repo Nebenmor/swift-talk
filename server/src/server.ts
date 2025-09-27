@@ -1,4 +1,4 @@
-// server.ts - FIXED Socket.IO configuration for Render deployment
+// server.ts - FINAL FIX with proper Socket.IO initialization and debugging
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import App from './app';
@@ -12,33 +12,30 @@ const app = new App();
 // Create HTTP server
 const httpServer = createServer(app.app);
 
-// CRITICAL FIX: Production-optimized Socket.IO configuration for Render
+console.log('🔧 Initializing Socket.IO server...');
+
+// CRITICAL FIX: Socket.IO configuration with comprehensive debugging
 const io = new SocketIOServer(httpServer, {
   cors: {
     origin: (origin, callback) => {
-      console.log('Socket.IO CORS check for origin:', origin);
+      console.log('🌐 Socket.IO CORS check for origin:', origin);
       
-      // CRITICAL FIX: Comprehensive origin whitelist for Vercel + Render
       const allowedOrigins = [
-        config.app.clientUrl, // https://swifttalk-chat.vercel.app
-        'https://swifttalk-chat.vercel.app', // Explicit frontend URL
-        'http://localhost:3000', // Local development
-        'http://localhost:5173', // Vite dev server  
-        'http://localhost:5174', // Alternative Vite port
-        // Vercel preview deployments (dynamic)
+        config.app.clientUrl,
+        'https://swifttalk-chat.vercel.app',
+        'http://localhost:3000',
+        'http://localhost:5173',
+        'http://localhost:5174',
         /^https:\/\/swifttalk-chat-.*\.vercel\.app$/,
         /^https:\/\/.*\.vercel\.app$/,
-        // Render domains
         /^https:\/\/.*\.onrender\.com$/
       ];
 
-      // Allow requests with no origin (mobile apps, Postman, etc.)
       if (!origin) {
-        console.log('No origin header - allowing request');
+        console.log('✅ No origin header - allowing request');
         return callback(null, true);
       }
 
-      // Check string matches first
       const stringMatch = allowedOrigins.some(allowedOrigin => {
         if (typeof allowedOrigin === 'string') {
           return allowedOrigin === origin;
@@ -47,11 +44,10 @@ const io = new SocketIOServer(httpServer, {
       });
 
       if (stringMatch) {
-        console.log('Origin allowed (string match):', origin);
+        console.log('✅ Origin allowed (string match):', origin);
         return callback(null, true);
       }
 
-      // Check regex patterns
       const regexMatch = allowedOrigins.some(allowedOrigin => {
         if (allowedOrigin instanceof RegExp) {
           return allowedOrigin.test(origin);
@@ -60,12 +56,12 @@ const io = new SocketIOServer(httpServer, {
       });
 
       if (regexMatch) {
-        console.log('Origin allowed (regex match):', origin);
+        console.log('✅ Origin allowed (regex match):', origin);
         return callback(null, true);
       }
 
-      console.warn(`Socket.IO CORS blocked origin: ${origin}`);
-      console.log('Allowed string origins:', allowedOrigins.filter(o => typeof o === 'string'));
+      console.warn('❌ Socket.IO CORS blocked origin:', origin);
+      console.log('📋 Allowed string origins:', allowedOrigins.filter(o => typeof o === 'string'));
       callback(new Error(`CORS: Origin ${origin} not allowed`));
     },
     methods: ['GET', 'POST'],
@@ -73,83 +69,89 @@ const io = new SocketIOServer(httpServer, {
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Origin'],
   },
   
-  // CRITICAL FIX: Transport configuration optimized for Render
-  transports: ['polling', 'websocket'], // Always start with polling for stability
-  
-  // CRITICAL FIX: Allow transport upgrades but with conservative settings  
+  transports: ['polling', 'websocket'],
   allowUpgrades: true,
-  
-  // CRITICAL FIX: Connection timeouts optimized for Render cold starts
-  pingTimeout: 60000, // 60 seconds (generous for cold starts)
-  pingInterval: 25000, // 25 seconds
-  
-  // CRITICAL FIX: Upgrade timeout for Render deployment
-  upgradeTimeout: 30000, // 30 seconds for slow connections
-  
-  // CRITICAL FIX: HTTP buffer size for file uploads
-  maxHttpBufferSize: 10e6, // 10MB to match your backend config
-  
-  // CRITICAL FIX: Disable legacy EIO3
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  upgradeTimeout: 30000,
+  maxHttpBufferSize: 10e6,
   allowEIO3: false,
   
-  // CRITICAL FIX: Production-specific optimizations
   ...(config.app.env === 'production' && {
-    // Enable compression for better performance
     compression: true,
-    
-    // CRITICAL FIX: Connection state recovery for reliability
     connectionStateRecovery: {
-      maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutes (reduced from 5)
+      maxDisconnectionDuration: 2 * 60 * 1000,
       skipMiddlewares: true,
     },
-    
-    // CRITICAL FIX: Connect timeout matching frontend
-    connectTimeout: 30000, // 30 seconds
-  }),
-  
-  // Development-specific settings
-  ...(config.app.env === 'development' && {
-    serveClient: false,
-    connectTimeout: 20000, // Shorter in dev
+    connectTimeout: 30000,
   }),
 });
 
-// Initialize Socket Manager
-const socketManager = new SocketManager(io);
+console.log('✅ Socket.IO server initialized');
 
-// CRITICAL FIX: Enhanced server startup for Render
+// Add debug endpoints to Express app after Socket.IO initialization
+app.app.get('/socket-debug', (req, res) => {
+  res.json({
+    socketIO: {
+      status: 'initialized',
+      clientsCount: io.engine.clientsCount,
+      transports: ['polling', 'websocket'],
+      engineReady: !!io.engine,
+    },
+    cors: {
+      clientUrl: config.app.clientUrl,
+      credentials: true
+    },
+    server: {
+      environment: config.app.env,
+      port: config.app.port,
+      uptime: Math.floor(process.uptime()),
+    },
+    timestamp: new Date().toISOString(),
+    debug: {
+      socketIOPath: '/socket.io/',
+      testUrl: `${req.protocol}://${req.get('host')}/socket.io/?EIO=4&transport=polling`
+    }
+  });
+});
+
+// Initialize Socket Manager
+console.log('🔧 Initializing Socket Manager...');
+const socketManager = new SocketManager(io);
+console.log('✅ Socket Manager initialized');
+
+// Enhanced server startup
 const startServer = async (): Promise<void> => {
   try {
-    console.log('\n=== SwiftTalk Server Startup ===');
-    console.log('Environment:', config.app.env.toUpperCase());
-    console.log('Port:', config.app.port);
-    console.log('Client URL:', config.app.clientUrl);
+    console.log('\n🚀 === SwiftTalk Server Startup ===');
+    console.log('📊 Environment:', config.app.env.toUpperCase());
+    console.log('🔌 Port:', config.app.port);
+    console.log('🌐 Client URL:', config.app.clientUrl);
     
-    // Initialize database connection first
-    console.log('Connecting to database...');
+    // Initialize database connection
+    console.log('🗄️  Connecting to database...');
     await app.start();
 
-    // CRITICAL FIX: Bind to all interfaces for Render
     const port = config.app.port;
-    const host = '0.0.0.0'; // Essential for Render deployment
+    const host = '0.0.0.0';
     
-    // Start HTTP server with Socket.IO
+    // Start server
     httpServer.listen(port, host, () => {
-      console.log('\n🚀 SwiftTalk Server Started Successfully!');
+      console.log('\n🎉 SwiftTalk Server Started Successfully!');
       console.log('================================================');
-      console.log(`🌐 Server: http://${host}:${port}`);
+      console.log(`🌍 Server: http://${host}:${port}`);
       console.log(`📱 Environment: ${config.app.env.toUpperCase()}`);
       console.log(`🔗 Client URL: ${config.app.clientUrl}`);
       console.log(`🗄️  Database: ${database.getConnectionStatus() ? '✅ Connected' : '❌ Disconnected'}`);
-      console.log(`⚡ Socket.IO: Ready (${io.engine.clientsCount} clients)`);
-      console.log(`🚛 Transports: ${JSON.stringify(['polling', 'websocket'])}`);
-      
-      // CRITICAL FIX: Render health check endpoint
-      console.log(`❤️  Health Check: http://${host}:${port}/health`);
+      console.log(`⚡ Socket.IO: ✅ Ready (${io.engine.clientsCount} clients)`);
+      console.log(`🚛 Transports: ["polling", "websocket"]`);
+      console.log(`🔍 Debug: http://${host}:${port}/socket-debug`);
+      console.log(`🧪 Socket.IO Test: http://${host}:${port}/socket.io/?EIO=4&transport=polling`);
+      console.log(`❤️  Health: http://${host}:${port}/health`);
       console.log('================================================\n');
     });
 
-    // CRITICAL FIX: Enhanced connection logging for debugging
+    // Socket.IO connection handler with enhanced logging
     io.on('connection', (socket) => {
       const clientInfo = {
         id: socket.id,
@@ -160,32 +162,35 @@ const startServer = async (): Promise<void> => {
         time: new Date().toISOString()
       };
       
-      console.log('📱 Socket Connected:', clientInfo);
+      console.log('📱 Socket Connected:', JSON.stringify(clientInfo, null, 2));
       console.log(`👥 Total Clients: ${io.engine.clientsCount}`);
       
-      // Log transport upgrades
       socket.conn.on('upgrade', () => {
-        console.log(`📈 Transport upgraded to: ${socket.conn.transport.name} (${socket.id})`);
+        console.log(`📈 Transport upgraded: ${socket.conn.transport.name} (${socket.id})`);
+      });
+
+      socket.on('disconnect', (reason) => {
+        console.log(`📱 Socket Disconnected: ${socket.id} (${reason})`);
+        console.log(`👥 Remaining Clients: ${io.engine.clientsCount}`);
       });
     });
 
-    // CRITICAL FIX: Comprehensive error handling for Render
+    // Enhanced error handling
     io.engine.on('connection_error', (err) => {
-      console.error('🚨 Socket.IO Connection Error:', {
-        code: err.code,
-        message: err.message,
-        context: err.context,
-        timestamp: new Date().toISOString(),
-        req: err.req ? {
-          url: err.req.url,
-          method: err.req.method,
-          origin: err.req.headers?.origin,
-          userAgent: err.req.headers?.['user-agent']?.substring(0, 50)
-        } : undefined
-      });
+      console.error('🚨 Socket.IO Connection Error:');
+      console.error('├─ Code:', err.code);
+      console.error('├─ Message:', err.message);
+      console.error('├─ Context:', err.context);
+      console.error('├─ Timestamp:', new Date().toISOString());
+      if (err.req) {
+        console.error('├─ Request URL:', err.req.url);
+        console.error('├─ Request Method:', err.req.method);
+        console.error('├─ Request Origin:', err.req.headers?.origin);
+        console.error('└─ User Agent:', err.req.headers?.['user-agent']?.substring(0, 50));
+      }
     });
 
-    // CRITICAL FIX: Monitor server health
+    // Health monitoring
     setInterval(() => {
       const stats = {
         connections: io.engine.clientsCount,
@@ -197,9 +202,9 @@ const startServer = async (): Promise<void> => {
       if (stats.connections > 0) {
         console.log('📊 Server Stats:', stats);
       }
-    }, 5 * 60 * 1000); // Every 5 minutes
+    }, 5 * 60 * 1000);
 
-    // Register graceful shutdown handlers
+    // Graceful shutdown handlers
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
     process.on('SIGHUP', () => gracefulShutdown('SIGHUP'));
@@ -210,16 +215,15 @@ const startServer = async (): Promise<void> => {
   }
 };
 
-// CRITICAL FIX: Graceful shutdown for Render deployments
+// Graceful shutdown
 const gracefulShutdown = (signal: string): void => {
   console.log(`\n🛑 ${signal} received. Initiating graceful shutdown...`);
 
   const forceShutdownTimer = setTimeout(() => {
-    console.error('⏰ Could not close connections in time, forcefully shutting down');
+    console.error('⏰ Forced shutdown after 30 seconds');
     process.exit(1);
   }, 30000);
 
-  // Close HTTP server first
   httpServer.close((err) => {
     if (err) {
       console.error('❌ Error closing HTTP server:', err);
@@ -229,24 +233,22 @@ const gracefulShutdown = (signal: string): void => {
     
     console.log('✅ HTTP server closed');
 
-    // Close Socket.IO server
     io.close((err) => {
       if (err) {
-        console.error('❌ Error closing Socket.IO server:', err);
+        console.error('❌ Error closing Socket.IO:', err);
       } else {
-        console.log('✅ Socket.IO server closed');
+        console.log('✅ Socket.IO closed');
       }
 
-      // Close database connection
       database.disconnect()
         .then(() => {
-          console.log('✅ Database connection closed');
+          console.log('✅ Database disconnected');
           console.log('🏁 Graceful shutdown completed');
           clearTimeout(forceShutdownTimer);
           process.exit(0);
         })
         .catch((error) => {
-          console.error('❌ Error closing database connection:', error);
+          console.error('❌ Database disconnect error:', error);
           clearTimeout(forceShutdownTimer);
           process.exit(1);
         });

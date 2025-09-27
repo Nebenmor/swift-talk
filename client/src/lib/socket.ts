@@ -1,8 +1,7 @@
-// socket.ts - FIXED configuration for Vercel deployment
+// socket.ts - FINAL FIX: Remove manual Origin header
 import { io, Socket } from "socket.io-client";
 import { getToken } from "./auth";
 
-// CRITICAL FIX: Use correct Socket.IO endpoint for Render
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
 
 console.log("Socket.IO Configuration:", {
@@ -37,7 +36,7 @@ class SocketService {
   private connected = false;
   private isAuthenticated = false;
   private reconnectAttempts = 0;
-  private readonly maxReconnectAttempts = 3; // Reduced for production
+  private readonly maxReconnectAttempts = 3;
   private connectionTimeout: NodeJS.Timeout | null = null;
 
   public static getInstance(): SocketService {
@@ -48,7 +47,7 @@ class SocketService {
   private constructor() {}
 
   async connect(): Promise<void> {
-    console.log("=== SOCKET CONNECTION ATTEMPT (VERCEL FIX) ===");
+    console.log("=== SOCKET CONNECTION ATTEMPT (FINAL FIX) ===");
     console.log("Socket URL:", SOCKET_URL);
 
     const token = getToken();
@@ -78,30 +77,28 @@ class SocketService {
       console.log("Creating Socket.IO connection...");
       
       try {
-        // CRITICAL FIX: Optimized configuration for Vercel + Render
+        // CRITICAL FIX: Remove manual Origin header - let browser handle CORS naturally
         this.socket = io(SOCKET_URL, {
-          // FIXED: Start with polling, allow upgrade to websockets
+          // Transport configuration optimized for Vercel + Render
           transports: ["polling", "websocket"],
           
-          // FIXED: Production-optimized timeouts for Vercel/Render
-          timeout: 10000, // 10 seconds (matches your intended timeout)
+          // Timeout configuration
+          timeout: 10000, // 10 seconds
           
-          // FIXED: Force new connection to avoid stale state
+          // Force new connection
           forceNew: true,
           
-          // FIXED: Reconnection settings for cloud deployment
+          // Reconnection settings
           reconnection: true,
           reconnectionAttempts: 3,
           reconnectionDelay: 2000,
           reconnectionDelayMax: 5000,
           
-          // FIXED: Upgrade settings for cloud deployment
+          // Allow upgrades
           upgrade: true,
           
-          // FIXED: Additional headers for cloud deployment
-          extraHeaders: {
-            'Origin': window.location.origin
-          }
+          // REMOVED: Manual extraHeaders - this was causing the "unsafe header" error
+          // The browser will automatically send the correct Origin header
         });
         
         console.log("Socket.IO instance created successfully");
@@ -113,8 +110,8 @@ class SocketService {
 
       console.log("Setting up event listeners...");
 
-      // CRITICAL FIX: Set connection timeout to match your configuration
-      const connectionTimeout = setTimeout(() => {
+      // Set connection timeout
+      this.connectionTimeout = setTimeout(() => {
         console.error("Socket connection timeout after 10 seconds");
         console.log("Debug info:", {
           socketExists: !!this.socket,
@@ -122,15 +119,19 @@ class SocketService {
           transport: this.socket?.io?.engine?.transport?.name,
           readyState: this.socket?.io?.engine?.readyState,
           url: SOCKET_URL,
-          socketId: this.socket?.id
+          socketId: this.socket?.id,
+          engineConnected: this.socket?.io?.engine?.connected
         });
         
         cleanup();
         reject(new Error("Connection timeout - Unable to connect to SwiftTalk servers"));
-      }, 10000); // Fixed to 10 seconds
+      }, 10000);
 
       const cleanup = () => {
-        clearTimeout(connectionTimeout);
+        if (this.connectionTimeout) {
+          clearTimeout(this.connectionTimeout);
+          this.connectionTimeout = null;
+        }
         if (this.socket) {
           this.socket.off("connect", onConnect);
           this.socket.off("authenticated", onAuthenticated);
@@ -140,10 +141,12 @@ class SocketService {
       };
 
       const onConnect = () => {
-        console.log("Socket connected successfully, authenticating...");
+        console.log("Socket connected successfully!");
         console.log("Socket ID:", this.socket?.id);
         console.log("Transport used:", this.socket?.io.engine?.transport?.name);
+        console.log("Engine connected:", this.socket?.io.engine?.connected);
         this.connected = true;
+        
         if (this.socket) {
           console.log("Sending authentication token...");
           this.socket.emit("authenticate", token);
@@ -168,6 +171,8 @@ class SocketService {
 
       const onConnectError = (error: Error) => {
         console.error("Connection error:", error.message);
+        console.log("Error type:", error.constructor.name);
+        console.log("Error details:", error);
         console.log("Reconnect attempts:", this.reconnectAttempts);
         
         cleanup();
@@ -180,7 +185,7 @@ class SocketService {
       this.socket.once("auth_error", onAuthError);
       this.socket.on("connect_error", onConnectError);
 
-      // Enhanced debugging for cloud deployment
+      // Additional debugging events
       this.socket.on("connecting", () => {
         console.log("Socket attempting to connect...");
       });
@@ -200,7 +205,12 @@ class SocketService {
         }
       });
 
-      console.log("Event listeners configured, initiating connection...");
+      // Log when transport upgrades
+      this.socket.on("upgrade", () => {
+        console.log("Transport upgraded to:", this.socket?.io.engine?.transport?.name);
+      });
+
+      console.log("Event listeners configured, connection should initiate automatically...");
     });
   }
 

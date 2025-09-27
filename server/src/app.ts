@@ -20,13 +20,14 @@ import chatRoutes from './routes/chatRoutes';
 class App {
   public app: Application;
 
-  constructor() {
-    this.app = express();
-    this.configureProduction();
-    this.initializeMiddlewares();
-    this.initializeRoutes();
-    this.initializeErrorHandling();
-  }
+constructor() {
+  this.app = express();
+  this.configureProduction();
+  this.initializeMiddlewares();
+  this.addDebugEndpoints(); // Add this line
+  this.initializeRoutes();
+  this.initializeErrorHandling();
+}
 
   private configureProduction(): void {
     // Trust proxy for Render deployment
@@ -253,6 +254,38 @@ class App {
       });
     });
   }
+
+  private addDebugEndpoints(): void {
+  // Socket.IO debug endpoint
+  this.app.get('/socket-debug', (req: Request, res: Response) => {
+    res.json({
+      socketIO: 'enabled',
+      status: 'Socket.IO should be initialized in server.ts',
+      transports: ['polling', 'websocket'],
+      cors: {
+        origin: config.app.clientUrl,
+        credentials: true
+      },
+      config: {
+        environment: config.app.env,
+        clientUrl: config.app.clientUrl,
+        port: config.app.port
+      },
+      timestamp: new Date().toISOString()
+    });
+  });
+
+  // Test CORS endpoint
+  this.app.get('/cors-test', (req: Request, res: Response) => {
+    res.json({
+      origin: req.headers.origin || 'no-origin',
+      userAgent: req.headers['user-agent']?.substring(0, 50) + '...',
+      method: req.method,
+      timestamp: new Date().toISOString(),
+      message: 'CORS test successful'
+    });
+  });
+}
 
   private initializeRoutes(): void {
     // API routes with versioning
