@@ -101,11 +101,6 @@ class SocketService {
           // Explicit CORS handling
           withCredentials: true,
           
-          // Extra headers to ensure CORS compliance
-          extraHeaders: {
-            "Access-Control-Allow-Origin": "*"
-          },
-          
           // Simple query params
           query: {
             timestamp: Date.now()
