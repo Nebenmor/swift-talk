@@ -75,7 +75,7 @@ class SocketService {
         return;
       }
 
-      // SIMPLIFIED: Basic Socket.IO configuration
+      // SIMPLIFIED: Basic Socket.IO configuration with explicit CORS handling
       try {
         this.socket = io(SOCKET_URL, {
           // Start with polling only, no WebSocket upgrade
@@ -83,6 +83,9 @@ class SocketService {
           
           // Disable upgrade to avoid complications
           upgrade: false,
+          
+          // Explicit autoConnect
+          autoConnect: true,
           
           // Basic timeouts
           timeout: 20000, // 20 seconds
@@ -94,6 +97,14 @@ class SocketService {
           
           // Force new connection
           forceNew: true,
+          
+          // Explicit CORS handling
+          withCredentials: true,
+          
+          // Extra headers to ensure CORS compliance
+          extraHeaders: {
+            "Access-Control-Allow-Origin": "*"
+          },
           
           // Simple query params
           query: {
