@@ -280,72 +280,74 @@ export default function Chat() {
     socketService.emit('send_message', messageData);
   };
 
-  // Helper function for HTTP sending
-  const sendViaHttp = async (tempId: string, content: string, messageType: 'text' | 'file', fileData?: unknown) => {
-    if (!selectedFriend) return;
+ // Helper function for HTTP sending - UPDATED
+const sendViaHttp = async (tempId: string, content: string, messageType: 'text' | 'file', fileData?: unknown) => {
+  if (!selectedFriend) return;
 
-    const requestData: Record<string, unknown> = {
-      recipient: selectedFriend._id,
-      content,
-      messageType,
-    };
-
-    if (messageType === 'file' && fileData) {
-      const fileInfo = fileData as { fileUrl: string; fileName: string; fileSize: number };
-      requestData.fileUrl = fileInfo.fileUrl;
-      requestData.fileName = fileInfo.fileName;
-      requestData.fileSize = fileInfo.fileSize;
-    }
-
-    const response = await api.post('/chat/messages', requestData);
-    if (response.data.success) {
-      const serverMessage = response.data.data;
-      
-      // Convert relative URLs to absolute URLs for immediate display
-      if (serverMessage.messageType === 'file' && serverMessage.fileUrl && !serverMessage.fileUrl.startsWith('http')) {
-        serverMessage.fileUrl = `http://localhost:5000${serverMessage.fileUrl}`;
-      }
-      
-      setMessages(prevMessages => 
-        prevMessages.map(msg => msg._id === tempId ? { ...serverMessage } : msg)
-      );
-    }
+  const requestData: Record<string, unknown> = {
+    recipient: selectedFriend._id,
+    content,
+    messageType,
   };
 
-  const createOptimisticMessage = (
-    tempId: string, 
-    content: string, 
-    messageType: 'text' | 'file',
-    fileData?: unknown
-  ): Message => {
-    if (!selectedFriend || !user) {
-      throw new Error('Missing required data for message creation');
-    }
+  if (messageType === 'file' && fileData) {
+    const fileInfo = fileData as { fileUrl: string; fileName: string; fileSize: number };
+    requestData.fileUrl = fileInfo.fileUrl;
+    requestData.fileName = fileInfo.fileName;
+    requestData.fileSize = fileInfo.fileSize;
+  }
 
-    let displayFileUrl = undefined;
-    if (messageType === 'file' && fileData) {
-      const fileInfo = fileData as { fileUrl: string };
-      displayFileUrl = fileInfo.fileUrl.startsWith('http') 
-        ? fileInfo.fileUrl 
-        : `http://localhost:5000${fileInfo.fileUrl}`;
+  const response = await api.post('/chat/messages', requestData);
+  if (response.data.success) {
+    const serverMessage = response.data.data;
+    
+    // FIXED: Convert relative URLs to absolute URLs with correct server
+    if (serverMessage.messageType === 'file' && serverMessage.fileUrl && !serverMessage.fileUrl.startsWith('http')) {
+      serverMessage.fileUrl = `https://swift-talk-i1ov.onrender.com${serverMessage.fileUrl}`;
     }
+    
+    setMessages(prevMessages => 
+      prevMessages.map(msg => msg._id === tempId ? { ...serverMessage } : msg)
+    );
+  }
+};
 
-    return {
-      _id: tempId,
-      sender: {
-        _id: user._id,
-        username: user.username,
-        avatar: user.avatar,
-      },
-      recipient: selectedFriend._id,
-      content,
-      messageType,
-      fileUrl: displayFileUrl,
-      fileName: messageType === 'file' && fileData ? (fileData as { fileName: string }).fileName : undefined,
-      isRead: false,
-      createdAt: new Date(),
-    };
+// createOptimisticMessage function to handle message creation
+const createOptimisticMessage = (
+  tempId: string, 
+  content: string, 
+  messageType: 'text' | 'file',
+  fileData?: unknown
+): Message => {
+  if (!selectedFriend || !user) {
+    throw new Error('Missing required data for message creation');
+  }
+
+  let displayFileUrl = undefined;
+  if (messageType === 'file' && fileData) {
+    const fileInfo = fileData as { fileUrl: string };
+    // FIXED: Use correct server URL for images
+    displayFileUrl = fileInfo.fileUrl.startsWith('http') 
+      ? fileInfo.fileUrl 
+      : `https://swift-talk-i1ov.onrender.com${fileInfo.fileUrl}`;
+  }
+
+  return {
+    _id: tempId,
+    sender: {
+      _id: user._id,
+      username: user.username,
+      avatar: user.avatar,
+    },
+    recipient: selectedFriend._id,
+    content,
+    messageType,
+    fileUrl: displayFileUrl,
+    fileName: messageType === 'file' && fileData ? (fileData as { fileName: string }).fileName : undefined,
+    isRead: false,
+    createdAt: new Date(),
   };
+};
 
   // Message sending with improved file URL handling
   const handleSendMessage = async (content: string, messageType: 'text' | 'file' = 'text', fileData?: unknown) => {
