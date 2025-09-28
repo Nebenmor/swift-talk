@@ -1,4 +1,4 @@
-// Updated chatService.ts with proper file URL handling
+// Updated chatService.ts with fixed file URL handling for production deployment
 import { Message } from '../models/Message';
 import { Friendship } from '../models/Friendship';
 import { User } from '../models/User';
@@ -6,7 +6,7 @@ import { ChatMessage, PaginatedResponse, FileUploadResult } from '../types';
 import { config } from '../config/config';
 
 export class ChatService {
-  // Helper method to create absolute file URLs
+  // FIXED: Helper method to create absolute file URLs for production
   private static getAbsoluteFileUrl(fileUrl: string): string {
     if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
       return fileUrl;
@@ -15,8 +15,11 @@ export class ChatService {
     // Ensure fileUrl starts with /
     const normalizedFileUrl = fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`;
     
-    // Return full URL with server base
-    const serverUrl = `http://localhost:${config.app.port}`;
+    // CRITICAL FIX: Use production server URL instead of localhost
+    const serverUrl = config.app.env === 'production' 
+      ? 'https://swift-talk-i1ov.onrender.com'  // Your Render domain
+      : `http://localhost:${config.app.port}`;
+      
     return `${serverUrl}${normalizedFileUrl}`;
   }
 
@@ -134,7 +137,7 @@ export class ChatService {
       recipient: message.recipient.toString(),
       content: message.content,
       messageType: message.messageType,
-      // Convert relative URLs to absolute URLs
+      // FIXED: Convert relative URLs to absolute URLs
       fileUrl: message.fileUrl ? this.getAbsoluteFileUrl(message.fileUrl) : undefined,
       fileName: message.fileName,
       fileSize: message.fileSize,
@@ -188,7 +191,7 @@ export class ChatService {
       recipient: message.recipient.toString(),
       content: message.content,
       messageType: message.messageType,
-      // Convert relative URLs to absolute URLs
+      // FIXED: Convert relative URLs to absolute URLs
       fileUrl: message.fileUrl ? this.getAbsoluteFileUrl(message.fileUrl) : undefined,
       fileName: message.fileName,
       fileSize: message.fileSize,
@@ -315,6 +318,7 @@ export class ChatService {
       recipient: message.recipient._id ? message.recipient._id.toString() : message.recipient,
       content: message.content,
       messageType: message.messageType,
+      // FIXED: Convert relative URLs to absolute URLs
       fileUrl: message.fileUrl ? this.getAbsoluteFileUrl(message.fileUrl) : undefined,
       fileName: message.fileName,
       fileSize: message.fileSize,
@@ -382,6 +386,7 @@ export class ChatService {
           },
           lastMessage: lastMessage ? {
             ...lastMessage,
+            // FIXED: Convert relative URLs to absolute URLs
             fileUrl: lastMessage.fileUrl ? this.getAbsoluteFileUrl(lastMessage.fileUrl) : undefined
           } : null,
           unreadCount,
