@@ -23,6 +23,35 @@ export class ChatService {
     return `${serverUrl}${normalizedFileUrl}`;
   }
 
+  private static fixLegacyFileUrl(fileUrl: string | undefined): string | undefined {
+  if (!fileUrl) return undefined;
+  
+  // If it's already a proper HTTPS URL, return as is
+  if (fileUrl.startsWith('https://swift-talk-i1ov.onrender.com')) {
+    return fileUrl;
+  }
+  
+  // Fix localhost URLs (legacy data)
+  if (fileUrl.includes('localhost:10000') || fileUrl.includes('localhost:5000')) {
+    const filename = fileUrl.split('/uploads/')[1];
+    if (filename) {
+      return `https://swift-talk-i1ov.onrender.com/uploads/${filename}`;
+    }
+  }
+  
+  // Fix relative URLs
+  if (fileUrl.startsWith('/uploads/')) {
+    return `https://swift-talk-i1ov.onrender.com${fileUrl}`;
+  }
+  
+  // For any other relative paths
+  if (!fileUrl.startsWith('http')) {
+    return `https://swift-talk-i1ov.onrender.com/uploads/${fileUrl}`;
+  }
+  
+  return fileUrl;
+}
+
   static async sendMessage(
     senderId: string,
     recipientId: string,
@@ -87,12 +116,12 @@ export class ChatService {
     };
   }
 
-  static async getChatHistory(
-    userId: string,
-    otherUserId: string,
-    page = 1,
-    limit = 50
-  ): Promise<PaginatedResponse<ChatMessage>> {
+ static async getChatHistory(
+  userId: string,
+  otherUserId: string,
+  page = 1,
+  limit = 50
+): Promise<PaginatedResponse<ChatMessage>> {
     // Check if users are friends - using direct query
     const friendship = await Friendship.findOne({
       $or: [
@@ -172,33 +201,33 @@ export class ChatService {
     };
   }
 
-  static async getMessageById(messageId: string): Promise<ChatMessage | null> {
-    const message = await Message.findById(messageId)
-      .populate('sender', 'username avatar')
-      .lean();
+static async getMessageById(messageId: string): Promise<ChatMessage | null> {
+  const message = await Message.findById(messageId)
+    .populate('sender', 'username avatar')
+    .lean();
 
-    if (!message) {
-      return null;
-    }
-
-    return {
-      _id: message._id.toString(),
-      sender: {
-        _id: (message.sender as any)._id.toString(),
-        username: (message.sender as any).username,
-        avatar: (message.sender as any).avatar,
-      },
-      recipient: message.recipient.toString(),
-      content: message.content,
-      messageType: message.messageType,
-      // FIXED: Convert relative URLs to absolute URLs
-      fileUrl: message.fileUrl ? this.getAbsoluteFileUrl(message.fileUrl) : undefined,
-      fileName: message.fileName,
-      fileSize: message.fileSize,
-      isRead: message.isRead,
-      createdAt: message.createdAt || new Date(),
-    };
+  if (!message) {
+    return null;
   }
+
+  return {
+    _id: message._id.toString(),
+    sender: {
+      _id: (message.sender as any)._id.toString(),
+      username: (message.sender as any).username,
+      avatar: (message.sender as any).avatar,
+    },
+    recipient: message.recipient.toString(),
+    content: message.content,
+    messageType: message.messageType,
+    // CRITICAL FIX: Handle legacy URLs
+    fileUrl: this.fixLegacyFileUrl(message.fileUrl),
+    fileName: message.fileName,
+    fileSize: message.fileSize,
+    isRead: message.isRead,
+    createdAt: message.createdAt || new Date(),
+  };
+}
 
   // ENHANCED: Mark messages as read with better error handling
   static async markMessagesAsRead(
@@ -309,33 +338,34 @@ export class ChatService {
     ]);
 
     const formattedMessages: ChatMessage[] = messages.map((message: any) => ({
-      _id: message._id.toString(),
-      sender: {
-        _id: message.sender._id.toString(),
-        username: message.sender.username,
-        avatar: message.sender.avatar,
-      },
-      recipient: message.recipient._id ? message.recipient._id.toString() : message.recipient,
-      content: message.content,
-      messageType: message.messageType,
-      // FIXED: Convert relative URLs to absolute URLs
-      fileUrl: message.fileUrl ? this.getAbsoluteFileUrl(message.fileUrl) : undefined,
-      fileName: message.fileName,
-      fileSize: message.fileSize,
-      isRead: message.isRead,
-      createdAt: message.createdAt || new Date(),
-    }));
+    _id: message._id.toString(),
+    sender: {
+      _id: message.sender._id.toString(),
+      username: message.sender.username,
+      avatar: message.sender.avatar,
+    },
+    recipient: message.recipient.toString(),
+    content: message.content,
+    messageType: message.messageType,
+    // CRITICAL FIX: Handle legacy URLs from database
+    fileUrl: this.fixLegacyFileUrl(message.fileUrl),
+    fileName: message.fileName,
+    fileSize: message.fileSize,
+    isRead: message.isRead,
+    createdAt: message.createdAt || new Date(),
+  }));
 
-    return {
-      data: formattedMessages,
-      pagination: {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit),
-      },
-    };
-  }
+  return {
+    data: formattedMessages,
+    pagination: {
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit)
+    },
+  };
+}
+
 
   static async getChatRooms(userId: string): Promise<any[]> {
     // Get all friends using direct query
