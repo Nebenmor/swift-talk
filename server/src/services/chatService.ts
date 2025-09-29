@@ -1,4 +1,4 @@
-// Updated chatService.ts with fixed file URL handling for production deployment
+// chatService.ts - Complete version with environment variables
 import { Message } from '../models/Message';
 import { Friendship } from '../models/Friendship';
 import { User } from '../models/User';
@@ -6,51 +6,48 @@ import { ChatMessage, PaginatedResponse, FileUploadResult } from '../types';
 import { config } from '../config/config';
 
 export class ChatService {
-  // FIXED: Helper method to create absolute file URLs for production
-  private static getAbsoluteFileUrl(fileUrl: string): string {
-    if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+  // Get the server base URL from environment
+  private static getServerBaseUrl(): string {
+    // Use environment variable if available, otherwise construct from config
+    return process.env.SERVER_BASE_URL || 
+           (config.app.env === 'production' 
+             ? 'https://swift-talk-i1ov.onrender.com'
+             : `http://localhost:${config.app.port}`);
+  }
+
+  // Fix legacy URLs and convert relative paths to absolute
+  private static fixLegacyFileUrl(fileUrl: string | undefined): string | undefined {
+    if (!fileUrl) return undefined;
+    
+    const serverUrl = this.getServerBaseUrl();
+    
+    // Already correct absolute URL
+    if (fileUrl.startsWith(serverUrl)) {
       return fileUrl;
     }
     
-    // Ensure fileUrl starts with /
-    const normalizedFileUrl = fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`;
+    // Fix localhost URLs (legacy data from development)
+    if (fileUrl.includes('localhost:10000') || 
+        fileUrl.includes('localhost:5000') || 
+        fileUrl.includes('localhost:3000')) {
+      const filenameParts = fileUrl.split('/uploads/');
+      if (filenameParts[1]) {
+        return `${serverUrl}/uploads/${filenameParts[1]}`;
+      }
+    }
     
-    // CRITICAL FIX: Use production server URL instead of localhost
-    const serverUrl = config.app.env === 'production' 
-      ? 'https://swift-talk-i1ov.onrender.com'  // Your Render domain
-      : `http://localhost:${config.app.port}`;
-      
-    return `${serverUrl}${normalizedFileUrl}`;
-  }
-
-  private static fixLegacyFileUrl(fileUrl: string | undefined): string | undefined {
-  if (!fileUrl) return undefined;
-  
-  // If it's already a proper HTTPS URL, return as is
-  if (fileUrl.startsWith('https://swift-talk-i1ov.onrender.com')) {
+    // Fix relative URLs
+    if (fileUrl.startsWith('/uploads/')) {
+      return `${serverUrl}${fileUrl}`;
+    }
+    
+    // Fix bare filenames
+    if (!fileUrl.startsWith('http') && !fileUrl.startsWith('/')) {
+      return `${serverUrl}/uploads/${fileUrl}`;
+    }
+    
     return fileUrl;
   }
-  
-  // Fix localhost URLs (legacy data)
-  if (fileUrl.includes('localhost:10000') || fileUrl.includes('localhost:5000')) {
-    const filename = fileUrl.split('/uploads/')[1];
-    if (filename) {
-      return `https://swift-talk-i1ov.onrender.com/uploads/${filename}`;
-    }
-  }
-  
-  // Fix relative URLs
-  if (fileUrl.startsWith('/uploads/')) {
-    return `https://swift-talk-i1ov.onrender.com${fileUrl}`;
-  }
-  
-  // For any other relative paths
-  if (!fileUrl.startsWith('http')) {
-    return `https://swift-talk-i1ov.onrender.com/uploads/${fileUrl}`;
-  }
-  
-  return fileUrl;
-}
 
   static async sendMessage(
     senderId: string,
@@ -63,7 +60,6 @@ export class ChatService {
       fileSize: number;
     }
   ): Promise<ChatMessage> {
-    // Check if users are friends - using direct query
     const friendship = await Friendship.findOne({
       $or: [
         { requester: senderId, recipient: recipientId, status: 'accepted' },
@@ -75,7 +71,6 @@ export class ChatService {
       throw new Error('Can only send messages to friends');
     }
 
-    // Create message data
     const messageData: any = {
       sender: senderId,
       recipient: recipientId,
@@ -83,19 +78,14 @@ export class ChatService {
       messageType,
     };
 
-    // Add file data if it's a file message
     if (messageType === 'file' && fileData) {
-      // CRITICAL FIX: Convert relative URLs to absolute URLs immediately
-      messageData.fileUrl = this.getAbsoluteFileUrl(fileData.fileUrl);
+      messageData.fileUrl = this.fixLegacyFileUrl(fileData.fileUrl);
       messageData.fileName = fileData.fileName;
       messageData.fileSize = fileData.fileSize;
     }
 
-    // Create and save message
     const message = new Message(messageData);
     await message.save();
-
-    // Populate sender information
     await message.populate('sender', 'username avatar isOnline');
     
     return {
@@ -116,13 +106,12 @@ export class ChatService {
     };
   }
 
- static async getChatHistory(
-  userId: string,
-  otherUserId: string,
-  page = 1,
-  limit = 50
-): Promise<PaginatedResponse<ChatMessage>> {
-    // Check if users are friends - using direct query
+  static async getChatHistory(
+    userId: string,
+    otherUserId: string,
+    page = 1,
+    limit = 50
+  ): Promise<PaginatedResponse<ChatMessage>> {
     const friendship = await Friendship.findOne({
       $or: [
         { requester: userId, recipient: otherUserId, status: 'accepted' },
@@ -166,8 +155,7 @@ export class ChatService {
       recipient: message.recipient.toString(),
       content: message.content,
       messageType: message.messageType,
-      // FIXED: Convert relative URLs to absolute URLs
-      fileUrl: message.fileUrl ? this.getAbsoluteFileUrl(message.fileUrl) : undefined,
+      fileUrl: this.fixLegacyFileUrl(message.fileUrl),
       fileName: message.fileName,
       fileSize: message.fileSize,
       isRead: message.isRead,
@@ -176,12 +164,7 @@ export class ChatService {
 
     return {
       data: formattedMessages,
-      pagination: {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit)
-      },
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     };
   }
 
@@ -189,11 +172,10 @@ export class ChatService {
     file: Express.Multer.File,
     uploaderId: string
   ): Promise<FileUploadResult> {
-    // Return relative path for storage, but we'll convert to absolute when serving
     const fileUrl = `/uploads/${file.filename}`;
     
     return {
-      url: fileUrl, // Store as relative path
+      url: fileUrl,
       filename: file.filename,
       originalName: file.originalname,
       size: file.size,
@@ -201,95 +183,54 @@ export class ChatService {
     };
   }
 
-static async getMessageById(messageId: string): Promise<ChatMessage | null> {
-  const message = await Message.findById(messageId)
-    .populate('sender', 'username avatar')
-    .lean();
+  static async getMessageById(messageId: string): Promise<ChatMessage | null> {
+    const message = await Message.findById(messageId)
+      .populate('sender', 'username avatar')
+      .lean();
 
-  if (!message) {
-    return null;
+    if (!message) return null;
+
+    return {
+      _id: message._id.toString(),
+      sender: {
+        _id: (message.sender as any)._id.toString(),
+        username: (message.sender as any).username,
+        avatar: (message.sender as any).avatar,
+      },
+      recipient: message.recipient.toString(),
+      content: message.content,
+      messageType: message.messageType,
+      fileUrl: this.fixLegacyFileUrl(message.fileUrl),
+      fileName: message.fileName,
+      fileSize: message.fileSize,
+      isRead: message.isRead,
+      createdAt: message.createdAt || new Date(),
+    };
   }
 
-  return {
-    _id: message._id.toString(),
-    sender: {
-      _id: (message.sender as any)._id.toString(),
-      username: (message.sender as any).username,
-      avatar: (message.sender as any).avatar,
-    },
-    recipient: message.recipient.toString(),
-    content: message.content,
-    messageType: message.messageType,
-    // CRITICAL FIX: Handle legacy URLs
-    fileUrl: this.fixLegacyFileUrl(message.fileUrl),
-    fileName: message.fileName,
-    fileSize: message.fileSize,
-    isRead: message.isRead,
-    createdAt: message.createdAt || new Date(),
-  };
-}
-
-  // ENHANCED: Mark messages as read with better error handling
-  static async markMessagesAsRead(
-    senderId: string,
-    recipientId: string
-  ): Promise<void> {
-    console.log('=== MARKING MESSAGES AS READ ===');
-    console.log(`Sender: ${senderId}, Recipient: ${recipientId}`);
-    
-    try {
-      const result = await Message.updateMany(
-        {
-          sender: senderId,
-          recipient: recipientId,
-          isRead: false
-        },
-        { 
-          isRead: true,
-          updatedAt: new Date()
-        }
-      );
-      
-      console.log(`Marked ${result.modifiedCount} messages as read`);
-    } catch (error) {
-      console.error('Error marking messages as read:', error);
-      throw error;
-    }
+  static async markMessagesAsRead(senderId: string, recipientId: string): Promise<void> {
+    const result = await Message.updateMany(
+      { sender: senderId, recipient: recipientId, isRead: false },
+      { isRead: true, updatedAt: new Date() }
+    );
+    console.log(`Marked ${result.modifiedCount} messages as read`);
   }
 
-  static async getUnreadMessagesCount(
-    userId: string,
-    senderId?: string
-  ): Promise<number> {
+  static async getUnreadMessagesCount(userId: string, senderId?: string): Promise<number> {
     const query: any = { recipient: userId, isRead: false };
-    if (senderId) {
-      query.sender = senderId;
-    }
-    
+    if (senderId) query.sender = senderId;
     return await Message.countDocuments(query);
   }
 
-  static async deleteMessage(
-    messageId: string,
-    userId: string
-  ): Promise<void> {
+  static async deleteMessage(messageId: string, userId: string): Promise<void> {
     const message = await Message.findById(messageId);
+    if (!message) throw new Error('Message not found');
+    if (message.sender.toString() !== userId) throw new Error('Can only delete your own messages');
     
-    if (!message) {
-      throw new Error('Message not found');
-    }
-
-    // Only sender can delete message
-    if (message.sender.toString() !== userId) {
-      throw new Error('Can only delete your own messages');
-    }
-
-    // Check if message is less than 10 minutes old
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
     if (message.createdAt && message.createdAt < tenMinutesAgo) {
       throw new Error('Can only delete messages within 10 minutes of sending');
     }
-
     await Message.findByIdAndDelete(messageId);
   }
 
@@ -308,17 +249,12 @@ static async getMessageById(messageId: string): Promise<ChatMessage | null> {
     const skip = (page - 1) * limit;
     const searchRegex = new RegExp(query, 'i');
 
-    // Build search criteria
     const searchCriteria: any = {
-      $or: [
-        { sender: userId },
-        { recipient: userId },
-      ],
+      $or: [{ sender: userId }, { recipient: userId }],
       content: searchRegex,
-      messageType: 'text', // Only search text messages
+      messageType: 'text',
     };
 
-    // If searching in specific chat
     if (otherUserId) {
       searchCriteria.$or = [
         { sender: userId, recipient: otherUserId },
@@ -338,37 +274,29 @@ static async getMessageById(messageId: string): Promise<ChatMessage | null> {
     ]);
 
     const formattedMessages: ChatMessage[] = messages.map((message: any) => ({
-    _id: message._id.toString(),
-    sender: {
-      _id: message.sender._id.toString(),
-      username: message.sender.username,
-      avatar: message.sender.avatar,
-    },
-    recipient: message.recipient.toString(),
-    content: message.content,
-    messageType: message.messageType,
-    // CRITICAL FIX: Handle legacy URLs from database
-    fileUrl: this.fixLegacyFileUrl(message.fileUrl),
-    fileName: message.fileName,
-    fileSize: message.fileSize,
-    isRead: message.isRead,
-    createdAt: message.createdAt || new Date(),
-  }));
+      _id: message._id.toString(),
+      sender: {
+        _id: message.sender._id.toString(),
+        username: message.sender.username,
+        avatar: message.sender.avatar,
+      },
+      recipient: message.recipient._id ? message.recipient._id.toString() : message.recipient,
+      content: message.content,
+      messageType: message.messageType,
+      fileUrl: this.fixLegacyFileUrl(message.fileUrl),
+      fileName: message.fileName,
+      fileSize: message.fileSize,
+      isRead: message.isRead,
+      createdAt: message.createdAt || new Date(),
+    }));
 
-  return {
-    data: formattedMessages,
-    pagination: {
-      page,
-      limit,
-      total,
-      pages: Math.ceil(total / limit)
-    },
-  };
-}
-
+    return {
+      data: formattedMessages,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    };
+  }
 
   static async getChatRooms(userId: string): Promise<any[]> {
-    // Get all friends using direct query
     const friendships = await Friendship.find({
       $or: [
         { requester: userId, status: 'accepted' },
@@ -385,10 +313,8 @@ static async getMessageById(messageId: string): Promise<ChatMessage | null> {
         : friendship.requester as any;
     });
     
-    // Get chat rooms with last message and unread count
     const chatRooms = await Promise.all(
       friends.map(async (friend) => {
-        // Get latest message
         const lastMessage = await Message.findOne({
           $or: [
             { sender: userId, recipient: friend._id },
@@ -399,7 +325,6 @@ static async getMessageById(messageId: string): Promise<ChatMessage | null> {
         .populate('sender', 'username')
         .lean();
 
-        // Get unread count
         const unreadCount = await Message.countDocuments({
           sender: friend._id,
           recipient: userId,
@@ -416,8 +341,7 @@ static async getMessageById(messageId: string): Promise<ChatMessage | null> {
           },
           lastMessage: lastMessage ? {
             ...lastMessage,
-            // FIXED: Convert relative URLs to absolute URLs
-            fileUrl: lastMessage.fileUrl ? this.getAbsoluteFileUrl(lastMessage.fileUrl) : undefined
+            fileUrl: this.fixLegacyFileUrl(lastMessage.fileUrl)
           } : null,
           unreadCount,
           updatedAt: lastMessage ? lastMessage.createdAt : new Date(),
@@ -425,7 +349,6 @@ static async getMessageById(messageId: string): Promise<ChatMessage | null> {
       })
     );
 
-    // Sort by last message time
     return chatRooms.sort((a, b) => {
       const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
       const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
