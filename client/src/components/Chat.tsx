@@ -37,6 +37,10 @@ interface MessageReadData {
   readAt: Date;
 }
 
+const getServerUrl = () => {
+  return import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+};
+
 export default function Chat() {
   const [user, setUser] = useState<User | null>(null);
   const [friends, setFriends] = useState<Friend[]>([]);
@@ -301,11 +305,7 @@ const sendViaHttp = async (tempId: string, content: string, messageType: 'text' 
   if (response.data.success) {
     const serverMessage = response.data.data;
     
-    // FIXED: Convert relative URLs to absolute URLs with correct server
-    if (serverMessage.messageType === 'file' && serverMessage.fileUrl && !serverMessage.fileUrl.startsWith('http')) {
-      serverMessage.fileUrl = `https://swift-talk-i1ov.onrender.com${serverMessage.fileUrl}`;
-    }
-    
+    // No need to fix URLs - backend handles this now
     setMessages(prevMessages => 
       prevMessages.map(msg => msg._id === tempId ? { ...serverMessage } : msg)
     );
@@ -326,10 +326,10 @@ const createOptimisticMessage = (
   let displayFileUrl = undefined;
   if (messageType === 'file' && fileData) {
     const fileInfo = fileData as { fileUrl: string };
-    // FIXED: Use correct server URL for images
+    const serverUrl = getServerUrl();
     displayFileUrl = fileInfo.fileUrl.startsWith('http') 
       ? fileInfo.fileUrl 
-      : `https://swift-talk-i1ov.onrender.com${fileInfo.fileUrl}`;
+      : `${serverUrl}${fileInfo.fileUrl}`;
   }
 
   return {
@@ -348,6 +348,7 @@ const createOptimisticMessage = (
     createdAt: new Date(),
   };
 };
+
 
   // Message sending with improved file URL handling
   const handleSendMessage = async (content: string, messageType: 'text' | 'file' = 'text', fileData?: unknown) => {
