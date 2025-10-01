@@ -21,6 +21,12 @@ export default function Signup() {
   });
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [retryStatus, setRetryStatus] = useState<{
+    isRetrying: boolean;
+    attempt: number;
+    maxRetries: number;
+    nextRetryIn: number;
+  } | null>(null);
   const navigate = useNavigate();
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -33,9 +39,35 @@ export default function Signup() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setRetryStatus(null);
 
     try {
-      const response = await api.post<{ success: boolean; data: AuthResponse; message: string }>('/auth/register', formData);
+      const response = await api.postWithRetry<{ success: boolean; data: AuthResponse; message: string }>(
+        '/auth/register',
+        formData,
+        {
+          maxRetries: 5,
+          retryDelay: 2000,
+          onRetry: (attempt, maxRetries, delay) => {
+            setRetryStatus({
+              isRetrying: true,
+              attempt,
+              maxRetries,
+              nextRetryIn: delay,
+            });
+
+            if (attempt === 1) {
+              toast.loading(
+                'Backend is waking up from sleep... This may take 30-60 seconds.',
+                { id: 'backend-wakeup', duration: Infinity }
+              );
+            }
+          },
+        }
+      );
+      
+      // Dismiss the loading toast if it exists
+      toast.dismiss('backend-wakeup');
       
       if (response.data.success) {
         const { user, token } = response.data.data;
@@ -48,11 +80,13 @@ export default function Signup() {
         toast.error(response.data.message || 'Signup failed');
       }
     } catch (error) {
+      toast.dismiss('backend-wakeup');
       const apiError = error as ApiError;
-      const message = apiError.response?.data?.message || 'Signup failed';
+      const message = apiError.response?.data?.message || 'Signup failed. Please try again.';
       toast.error(message);
     } finally {
       setLoading(false);
+      setRetryStatus(null);
     }
   };
 
@@ -65,7 +99,7 @@ export default function Signup() {
     if (password.length >= 8) strength++;
     if (/[a-z]/.test(password)) strength++;
     if (/[A-Z]/.test(password)) strength++;
-    if (/\d/.test(password)) strength++; // Fixed to use \d instead of [0-9]
+    if (/\d/.test(password)) strength++;
     if (/[^A-Za-z0-9]/.test(password)) strength++;
 
     const levels = ['Very Weak', 'Weak', 'Fair', 'Good', 'Strong'];
@@ -105,6 +139,31 @@ export default function Signup() {
             <p className="text-gray-600 mt-1">Start your SwiftTalk journey today</p>
           </div>
 
+          {/* Backend Wake-up Notice */}
+          {retryStatus?.isRetrying && (
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-start space-x-3">
+                <div className="flex-shrink-0">
+                  <svg className="animate-spin h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-sm font-medium text-blue-900">
+                    Waking up backend server...
+                  </h3>
+                  <p className="mt-1 text-sm text-blue-700">
+                    The server is starting up (free tier sleep mode). This usually takes 30-60 seconds.
+                  </p>
+                  <p className="mt-2 text-xs text-blue-600">
+                    Retry attempt {retryStatus.attempt} of {retryStatus.maxRetries}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-2">
@@ -112,7 +171,7 @@ export default function Signup() {
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  
+                 
                 </div>
                 <input
                   type="text"
@@ -121,7 +180,8 @@ export default function Signup() {
                   value={formData.username}
                   onChange={handleChange}
                   required
-                  className="form-input pl-10 transition-colors focus:ring-blue-500 focus:border-blue-500"
+                  disabled={loading}
+                  className="form-input pl-10 transition-colors focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                   placeholder="Choose a unique username"
                   minLength={3}
                   maxLength={20}
@@ -138,7 +198,7 @@ export default function Signup() {
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  
+                 
                 </div>
                 <input
                   type="email"
@@ -147,7 +207,8 @@ export default function Signup() {
                   value={formData.email}
                   onChange={handleChange}
                   required
-                  className="form-input pl-10 transition-colors focus:ring-blue-500 focus:border-blue-500"
+                  disabled={loading}
+                  className="form-input pl-10 transition-colors focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                   placeholder="Enter your email address"
                 />
               </div>
@@ -159,7 +220,7 @@ export default function Signup() {
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                
+                  
                 </div>
                 <input
                   type={showPassword ? 'text' : 'password'}
@@ -168,14 +229,16 @@ export default function Signup() {
                   value={formData.password}
                   onChange={handleChange}
                   required
-                  className="form-input pl-10 pr-10 transition-colors focus:ring-blue-500 focus:border-blue-500"
+                  disabled={loading}
+                  className="form-input pl-10 pr-10 transition-colors focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                   placeholder="Create a strong password"
                   minLength={8}
                 />
                 <button
                   type="button"
                   onClick={togglePasswordVisibility}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 transition-colors"
+                  disabled={loading}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 transition-colors disabled:cursor-not-allowed"
                 >
                   {showPassword ? (
                     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -220,7 +283,7 @@ export default function Signup() {
               {loading ? (
                 <div className="flex items-center justify-center">
                   <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-                  Creating account...
+                  {retryStatus?.isRetrying ? 'Connecting to server...' : 'Creating account...'}
                 </div>
               ) : (
                 'Join SwiftTalk'
@@ -245,6 +308,9 @@ export default function Signup() {
         <div className="text-center mt-6">
           <p className="text-sm text-gray-500">
             Join thousands of users connecting on SwiftTalk
+          </p>
+          <p className="text-xs text-gray-400 mt-2">
+            First connection may take up to 60 seconds as the server wakes up
           </p>
         </div>
       </div>
